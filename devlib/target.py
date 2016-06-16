@@ -525,7 +525,14 @@ class LinuxTarget(Target):
     @property
     @memoized
     def abi(self):
-        value = self.execute('{} uname -m'.format(self.busybox)).strip()
+        if self.busybox:
+            value = self.execute('{} uname -m'.format(self.busybox)).strip()
+        else:
+            try:
+                value = self.execute('uname -m').strip()
+            except TargetError:
+                logging.error('Can\'t determine target ABI. ')
+                raise
         for abi, architectures in ABI_MAP.iteritems():
             if value in architectures:
                 result = abi
