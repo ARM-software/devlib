@@ -217,7 +217,8 @@ class CpufreqModule(Module):
         """
         if isinstance(cpu, int):
             cpu = 'cpu{}'.format(cpu)
-        available_frequencies = self.list_frequencies(cpu)
+        # Assume cpu is always of the form "cpu<n>"
+        available_frequencies = self.list_frequencies(int(cpu[3:]))
         try:
             value = int(frequency)
             if exact and available_frequencies and value not in available_frequencies:
@@ -266,10 +267,11 @@ class CpufreqModule(Module):
         """
         if isinstance(cpu, int):
             cpu = 'cpu{}'.format(cpu)
+        # Assume cpu is always of the form "cpu<n>"
+        available_frequencies = self.list_frequencies(int(cpu[3:]))
         try:
             value = int(frequency)
             if exact:
-                available_frequencies = self.list_frequencies(cpu)
                 if available_frequencies and value not in available_frequencies:
                     raise TargetError('Can\'t set {} frequency to {}\nmust be in {}'.format(cpu,
                                                                                             value,
@@ -315,7 +317,8 @@ class CpufreqModule(Module):
         """
         if isinstance(cpu, int):
             cpu = 'cpu{}'.format(cpu)
-        available_frequencies = self.list_frequencies(cpu)
+        # Assume cpu is always of the form "cpu<n>"
+        available_frequencies = self.list_frequencies(int(cpu[3:]))
         try:
             value = int(frequency)
             if exact and available_frequencies and value not in available_frequencies:
