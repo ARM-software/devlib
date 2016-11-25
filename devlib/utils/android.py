@@ -210,6 +210,7 @@ class AdbConnection(object):
             command = 'shell {} {}'.format(self.ls_command, source)
             output = adb_command(self.device, command, timeout=timeout)
             for line in output.splitlines():
+                line = line.strip()
                 command = "pull '{}' '{}'".format(line, dest)
                 adb_command(self.device, command, timeout=timeout)
             return
