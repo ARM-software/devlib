@@ -374,6 +374,11 @@ class Gem5Connection(TelnetConnection):
         # Wait for boot
         self._wait_for_boot()
 
+        # Before we do anything else, we need to make sure that the
+        # terminal is as quiet as possible! Therefore, we set the
+        # lowest log level.
+        self._gem5_shell('su -c "dmesg -n 1" root')
+
         # Mount the virtIO to transfer files in/out gem5 system
         self._mount_virtio()
 
