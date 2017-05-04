@@ -185,16 +185,22 @@ class SshConnection(object):
                 as_root=False, strip_colors=True): #pylint: disable=unused-argument
         try:
             with self.lock:
-                output = self._execute_and_wait_for_prompt(command, timeout, as_root, strip_colors)
+                _command = '({}); __devlib_ec=$?; echo; echo $__devlib_ec'.format(command)
+                raw_output = self._execute_and_wait_for_prompt(
+                    _command, timeout, as_root, strip_colors)
+                print repr(raw_output)
+                output, exit_code_text, _ = raw_output.rsplit('\r\n', 2)
+                print repr(output), repr(exit_code_text)
                 if check_exit_code:
-                    exit_code_text = self._execute_and_wait_for_prompt('echo $?', strip_colors=strip_colors, log=False)
                     try:
-                        exit_code = int(exit_code_text.split()[0])
+                        exit_code = int(exit_code_text)
                         if exit_code:
                             message = 'Got exit code {}\nfrom: {}\nOUTPUT: {}'
                             raise TargetError(message.format(exit_code, command, output))
                     except (ValueError, IndexError):
-                        logger.warning('Could not get exit code for "{}",\ngot: "{}"'.format(command, exit_code_text))
+                        logger.warning(
+                            'Could not get exit code for "{}",\ngot: "{}"'\
+                            .format(command, exit_code_text))
                 return output
         except EOF:
             raise TargetError('Connection lost.')
@@ -205,7 +211,8 @@ class SshConnection(object):
             keyfile_string = '-i {}'.format(self.keyfile) if self.keyfile else ''
             if as_root:
                 command = "sudo -- sh -c '{}'".format(command)
-            command = '{} {} {} {}@{} {}'.format(ssh, keyfile_string, port_string, self.username, self.host, command)
+            command = '{} {} {} {}@{} {}'.format(ssh, keyfile_string, port_string,
+                                                 self.username, self.host, command)
             logger.debug(command)
             if self.password:
                 command = _give_password(self.password, command)
