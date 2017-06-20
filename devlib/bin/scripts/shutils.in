@@ -177,6 +177,15 @@ cgroups_tasks_in() {
 	exit 0
 }
 
+cgroup_trace_attach_task() {
+        DST_ROOT=${1}
+        DST_PATH=${2}
+        TASKS_FILE=${3}
+
+        cat $TASKS_FILE | while read PID; do
+            echo "cgroup_attach_task_devlib: dst_root=$DST_ROOT dst_path=$DST_PATH pid=$PID" > /sys/kernel/debug/tracing/trace_marker
+        done
+}
 
 ################################################################################
 # Main Function Dispatcher
@@ -197,6 +206,9 @@ cpufreq_get_all_governors)
     ;;
 cpufreq_trace_all_frequencies)
     cpufreq_trace_all_frequencies $*
+    ;;
+cgroup_trace_attach_task)
+    cgroup_trace_attach_task $*
     ;;
 cpuidle_wake_all_cpus)
     cpuidle_wake_all_cpus $*
