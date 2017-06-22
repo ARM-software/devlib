@@ -14,6 +14,7 @@
 #
 # pylint: disable=attribute-defined-outside-init
 import logging
+import os
 from collections import namedtuple
 
 from devlib.module import Module
@@ -207,13 +208,15 @@ class Controller(object):
             tasks[cg] = self.tasks_count(cg)
         return tasks
 
+
 class CGroup(object):
 
-    def __init__(self, controller, name, create=True):
+    def __init__(self, controller, name, create=True, set_timeout=10):
         self.logger = logging.getLogger('cgroups.' + controller.kind)
         self.target = controller.target
         self.controller = controller
         self.name = name
+        self.set_timeout = set_timeout
 
         # Control cgroup path
         self.directory = controller.mount_point
@@ -273,7 +276,7 @@ class CGroup(object):
 
             # Set the attribute value
             try:
-                self.target.write_value(path, attrs[idx])
+                self._do_set(path, attrs[idx])
             except TargetError:
                 # Check if the error is due to a non-existing attribute
                 attrs = self.get()
@@ -297,7 +300,24 @@ class CGroup(object):
     def add_proc(self, pid):
         self.target.write_value(self.procs_file, pid, verify=False)
 
+    def _do_set(self, path, value):
+        self.target.write_value(path, value, verify=False)
+        read_value = self.target.read_value(path)
+
+        total_slept = 0
+        while read_value != value:
+            if total_slept > self.set_timeout:
+                param_name = os.path.basename(path)
+                msg = 'Cgroup {} param {} set failed; got "{}"'
+                raise TargetError(msg.format(self.name, param_name, read_value))
+
+            self.target.sleep(1)
+            total_slept += 1
+            read_value = self.target.read_value(path)
+
+
 CgroupSubsystemEntry = namedtuple('CgroupSubsystemEntry', 'name hierarchy num_cgroups enabled')
+
 
 class CgroupsModule(Module):
 
