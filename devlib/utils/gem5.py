@@ -27,10 +27,7 @@ def iter_statistics_dump(stats_file):
     reading from the statistics log file.
     '''
     cur_dump = {}
-    while True:
-        line = stats_file.readline()
-        if not line:
-            break
+    for line in stats_file:
         if GEM5STATS_DUMP_TAIL in line:
             yield cur_dump
             cur_dump = {}
