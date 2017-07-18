@@ -610,3 +610,11 @@ def memoized(wrapped, instance, args, kwargs):
 
     return memoize_wrapper(*args, **kwargs)
 
+def sync():
+    """Flushes OS buffers in UNIX systems"""
+    if hasattr(os, 'sync'):
+        os.sync()
+    elif os.name != 'nt':
+        os.system('sync')
+    else:
+        pass # Windows, hope for the best
