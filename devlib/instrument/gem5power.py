@@ -37,6 +37,8 @@ class Gem5PowerInstrument(Instrument):
         '''
         if not isinstance(target.platform, Gem5SimulationPlatform):
             raise TargetError('Gem5PowerInstrument requires a gem5 platform')
+        if not target.platform.power_models_dir:
+            raise TargetError('Power modelling not enabled in Gem5SimulationPlatform')
         if not target.has('gem5stats'):
             raise TargetError('Gem5StatsModule is not loaded')
         super(Gem5PowerInstrument, self).__init__(target)

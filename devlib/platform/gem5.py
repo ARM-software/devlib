@@ -37,7 +37,8 @@ class Gem5SimulationPlatform(Platform):
                  big_core=None,
                  model=None,
                  modules=None,
-                 gem5_telnet_port=None):
+                 gem5_telnet_port=None,
+                 power_models_dir=None):
 
         # First call the parent class
         super(Gem5SimulationPlatform, self).__init__(name, core_names, core_clusters,
@@ -52,6 +53,7 @@ class Gem5SimulationPlatform(Platform):
         self.gem5_interact_dir = '/tmp' # Host directory
         self.executable_dir = None # Device directory
         self.working_dir = None # Device directory
+        self.power_models_dir = power_models_dir # Location of the power models
         self.stdout_file = None
         self.stderr_file = None
         self.stderr_filename = None
@@ -126,6 +128,11 @@ class Gem5SimulationPlatform(Platform):
             # We need to keep this so we can check which port to use for the
             # telnet connection.
             self.stderr_filename = f
+
+            # Enable power modelling if required
+            if self.power_models_dir:
+                os.environ['POWER_MODEL_ROOT'] = self.power_models_dir
+                self.gem5args_args += ' --power-model'
 
             # Start gem5 simulation
             self.logger.info("Starting the gem5 simulator")
