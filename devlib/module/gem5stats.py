@@ -22,6 +22,8 @@ from devlib.module import Module
 from devlib.platform import Platform
 from devlib.platform.gem5 import Gem5SimulationPlatform
 from devlib.utils.gem5 import iter_statistics_dump, GEM5STATS_ROI_NUMBER, GEM5STATS_DUMP_TAIL
+from devlib.utils.zip import BufferedZippedTextReader
+from devlib.utils.misc import sync
 
 
 class Gem5ROI:
@@ -63,8 +65,6 @@ class Gem5StatsModule(Module):
     def __init__(self, target):
         super(Gem5StatsModule, self).__init__(target)
         self._current_origin = 0
-        self._stats_file_path = os.path.join(target.platform.gem5_out_dir,
-                                            'stats.txt')
         self.rois = {}
 
     def book_roi(self, label):
@@ -141,14 +141,14 @@ class Gem5StatsModule(Module):
             roi = self.rois[roi_label]
             return (roi.field in dump) and (int(dump[roi.field]) == 1)
 
-        with open(self._stats_file_path, 'r') as stats_file:
+        with self.get_input_stream() as stats_file:
             stats_file.seek(self._current_origin)
             for dump in iter_statistics_dump(stats_file):
                 active_rois = [l for l in rois_labels if roi_active(l, dump)]
                 if active_rois:
                     record = {k: dump[k] for k in keys}
                     yield (record, active_rois)
-
+                sync() # be sure to read the last dumps
 
     def reset_origin(self):
         '''
@@ -157,9 +157,19 @@ class Gem5StatsModule(Module):
         last_dump_tail = self._current_origin
         # Dump & reset stats to start from a fresh state
         self.target.execute('m5 dumpresetstats')
-        with open(self._stats_file_path, 'r') as stats_file:
+        with self.get_input_stream() as stats_file:
             for line in stats_file:
                 if GEM5STATS_DUMP_TAIL in line:
                     last_dump_tail = stats_file.tell()
         self._current_origin = last_dump_tail
 
+    def get_input_stream(self):
+        '''
+        Returns a read-only TextIOBase-like object for the statistics file.
+        '''
+        stats_filename = self.target.platform.stats_filename
+        gem5_out_dir = self.target.platform.gem5_out_dir
+        stats_path = os.path.join(gem5_out_dir, stats_filename)
+        if stats_path.endswith('.gz'):
+            return BufferedZippedTextReader(stats_path)
+        return open(stats_path, 'r')

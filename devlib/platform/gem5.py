@@ -55,6 +55,7 @@ class Gem5SimulationPlatform(Platform):
         self.stdout_file = None
         self.stderr_file = None
         self.stderr_filename = None
+        self.stats_filename = None
         if self.gem5_port is None:
             # Allows devlib to pick up already running simulations
             self.start_gem5_simulation = True
@@ -126,6 +127,13 @@ class Gem5SimulationPlatform(Platform):
             # We need to keep this so we can check which port to use for the
             # telnet connection.
             self.stderr_filename = f
+
+            # Keep track of the statistics log file
+            match = re.search('--stats-file=(?P<file>\S*)', self.gem5args_args)
+            if match:
+                self.stats_filename = match.group('file') 
+            else:
+                self.stats_filename = 'stats.txt'
 
             # Start gem5 simulation
             self.logger.info("Starting the gem5 simulator")
