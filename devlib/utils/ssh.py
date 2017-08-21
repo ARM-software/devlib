@@ -55,7 +55,7 @@ def ssh_get_shell(host, username, password=None, keyfile=None, port=None, timeou
                 raise ValueError('keyfile may not be used with a telnet connection.')
             conn = TelnetPxssh(original_prompt=original_prompt)
         else:  # ssh
-            conn = pxssh.pxssh()
+            conn = pxssh.pxssh(options={"StrictHostKeyChecking": "no"})
 
         try:
             if keyfile:
