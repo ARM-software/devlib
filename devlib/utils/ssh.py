@@ -285,18 +285,21 @@ class SshConnection(object):
         # only specify -P for scp if the port is *not* the default.
         port_string = '-P {}'.format(self.port) if (self.port and self.port != 22) else ''
         keyfile_string = '-i {}'.format(self.keyfile) if self.keyfile else ''
+
         options = " ".join([ "-o{}={}".format(key,val) for key,val in self.options.items()])
         command = '{} {} -r {} {} {} {}'.format(scp, options, keyfile_string, port_string, source, dest)
-        pass_string = ''
+        command_redacted = command
         logger.debug(command)
         if self.password:
             command = _give_password(self.password, command)
+            command_redacted = command.replace(self.password, '<redacted>')
         try:
             check_output(command, timeout=timeout, shell=True)
         except subprocess.CalledProcessError as e:
-            raise subprocess.CalledProcessError(e.returncode, e.cmd.replace(pass_string, ''), e.output)
+            raise HostError("Failed to copy file with '{}'. Output:\n{}".format(
+                command_redacted, e.output))
         except TimeoutError as e:
-            raise TimeoutError(e.command.replace(pass_string, ''), e.output)
+            raise TimeoutError(command_redacted, e.output)
 
 
 class TelnetConnection(SshConnection):

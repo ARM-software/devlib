@@ -102,6 +102,10 @@ class Target(object):
         return None
 
     @property
+    def supported_abi(self):
+        return [self.abi]
+
+    @property
     @memoized
     def cpuinfo(self):
         return Cpuinfo(self.execute('cat /proc/cpuinfo'))
@@ -350,6 +354,38 @@ class Target(object):
         if in_directory:
             command = 'cd {} && {}'.format(in_directory, command)
         return self.execute(command, as_root=as_root, timeout=timeout)
+
+    def background_invoke(self, binary, args=None, in_directory=None,
+                          on_cpus=None, as_root=False):
+        """
+        Executes the specified binary as a background task under the
+        specified conditions.
+
+        :binary: binary to execute. Must be present and executable on the device.
+        :args: arguments to be passed to the binary. The can be either a list or
+               a string.
+        :in_directory:  execute the binary in the  specified directory. This must
+                        be an absolute path.
+        :on_cpus:  taskset the binary to these CPUs. This may be a single ``int`` (in which
+                   case, it will be interpreted as the mask), a list of ``ints``, in which
+                   case this will be interpreted as the list of cpus, or string, which
+                   will be interpreted as a comma-separated list of cpu ranges, e.g.
+                   ``"0,4-7"``.
+        :as_root: Specify whether the command should be run as root
+
+        :returns: the subprocess instance handling that command
+        """
+        command = binary
+        if args:
+            if isiterable(args):
+                args = ' '.join(args)
+            command = '{} {}'.format(command, args)
+        if on_cpus:
+            on_cpus = bitmask(on_cpus)
+            command = '{} taskset 0x{:x} {}'.format(self.busybox, on_cpus, command)
+        if in_directory:
+            command = 'cd {} && {}'.format(in_directory, command)
+        return self.background(command, as_root=as_root)
 
     def kick_off(self, command, as_root=False):
         raise NotImplementedError()
@@ -798,6 +834,30 @@ class AndroidTarget(Target):
 
     @property
     @memoized
+    def supported_abi(self):
+        props = self.getprop()
+        result = [props['ro.product.cpu.abi']]
+        if 'ro.product.cpu.abi2' in props:
+            result.append(props['ro.product.cpu.abi2'])
+        if 'ro.product.cpu.abilist' in props:
+            for abi in props['ro.product.cpu.abilist'].split(','):
+                if abi not in result:
+                    result.append(abi)
+
+        mapped_result = []
+        for supported_abi in result:
+            for abi, architectures in ABI_MAP.iteritems():
+                found = False
+                if supported_abi in architectures and abi not in mapped_result:
+                    mapped_result.append(abi)
+                    found = True
+                    break
+            if not found and supported_abi not in mapped_result:
+                mapped_result.append(supported_abi)
+        return mapped_result
+
+    @property
+    @memoized
     def os_version(self):
         os_version = {}
         for k, v in self.getprop().iteritems():
@@ -877,8 +937,16 @@ class AndroidTarget(Target):
             pass
         self._connected_as_root = None
 
-    def connect(self, timeout=10, check_boot_completed=True):  # pylint: disable=arguments-differ
+    def wait_boot_complete(self, timeout=10):
         start = time.time()
+        boot_completed = boolean(self.getprop('sys.boot_completed'))
+        while not boot_completed and timeout >= time.time() - start:
+            time.sleep(5)
+            boot_completed = boolean(self.getprop('sys.boot_completed'))
+        if not boot_completed:
+            raise TargetError('Connected but Android did not fully boot.')
+
+    def connect(self, timeout=10, check_boot_completed=True):  # pylint: disable=arguments-differ
         device = self.connection_settings.get('device')
         if device and ':' in device:
             # ADB does not automatically remove a network device from it's
@@ -890,12 +958,7 @@ class AndroidTarget(Target):
         super(AndroidTarget, self).connect(timeout=timeout)
 
         if check_boot_completed:
-            boot_completed = boolean(self.getprop('sys.boot_completed'))
-            while not boot_completed and timeout >= time.time() - start:
-                time.sleep(5)
-                boot_completed = boolean(self.getprop('sys.boot_completed'))
-            if not boot_completed:
-                raise TargetError('Connected but Android did not fully boot.')
+            self.wait_boot_complete(timeout)
 
     def setup(self, executables=None):
         super(AndroidTarget, self).setup(executables)
@@ -998,20 +1061,25 @@ class AndroidTarget(Target):
 
     # Android-specific
 
-    def swipe_to_unlock(self, direction="horizontal"):
+    def swipe_to_unlock(self, direction="diagonal"):
         width, height = self.screen_resolution
         command = 'input swipe {} {} {} {}'
-        if direction == "horizontal":
-            swipe_heigh = height * 2 // 3
+        if direction == "diagonal":
             start = 100
             stop = width - start
-            self.execute(command.format(start, swipe_heigh, stop, swipe_heigh))
-        if direction == "vertical":
-            swipe_middle = height / 2
-            swipe_heigh = height * 2 // 3
-            self.execute(command.format(swipe_middle, swipe_heigh, swipe_middle, 0))
+            swipe_height = height * 2 // 3
+            self.execute(command.format(start, swipe_height, stop, 0))
+        elif direction == "horizontal":
+            swipe_height = height * 2 // 3
+            start = 100
+            stop = width - start
+            self.execute(command.format(start, swipe_height, stop, swipe_height))
+        elif direction == "vertical":
+            swipe_middle = width / 2
+            swipe_height = height * 2 // 3
+            self.execute(command.format(swipe_middle, swipe_height, swipe_middle, 0))
         else:
-            raise DeviceError("Invalid swipe direction: {}".format(self.swipe_to_unlock))
+            raise TargetError("Invalid swipe direction: {}".format(direction))
 
     def getprop(self, prop=None):
         props = AndroidProperties(self.execute('getprop'))
@@ -1088,6 +1156,12 @@ class AndroidTarget(Target):
     def clear_logcat(self):
         adb_command(self.adb_name, 'logcat -c', timeout=30)
 
+    def adb_kill_server(self, timeout=30):
+        adb_command(self.adb_name, 'kill-server', timeout)
+
+    def adb_wait_for_device(self, timeout=30):
+        adb_command(self.adb_name, 'wait-for-device', timeout)
+
     def adb_reboot_bootloader(self, timeout=30):
         adb_command(self.adb_name, 'reboot-bootloader', timeout)
 
@@ -1116,6 +1190,69 @@ class AndroidTarget(Target):
     def ensure_screen_is_off(self):
         if self.is_screen_on():
             self.execute('input keyevent 26')
+
+    def set_auto_brightness(self, auto_brightness):
+        cmd = 'settings put system screen_brightness_mode {}'
+        self.execute(cmd.format(int(boolean(auto_brightness))))
+
+    def get_auto_brightness(self):
+        cmd = 'settings get system screen_brightness_mode'
+        return boolean(self.execute(cmd).strip())
+
+    def set_brightness(self, value):
+        if not 0 <= value <= 255:
+            msg = 'Invalid brightness "{}"; Must be between 0 and 255'
+            raise ValueError(msg.format(value))
+        self.set_auto_brightness(False)
+        cmd = 'settings put system screen_brightness {}'
+        self.execute(cmd.format(int(value)))
+
+    def get_brightness(self):
+        cmd = 'settings get system screen_brightness'
+        return integer(self.execute(cmd).strip())
+
+    def get_airplane_mode(self):
+        cmd = 'settings get global airplane_mode_on'
+        return boolean(self.execute(cmd).strip())
+
+    def set_airplane_mode(self, mode):
+        root_required = self.get_sdk_version() > 23
+        if root_required and not self.is_rooted:
+            raise TargetError('Root is required to toggle airplane mode on Android 7+')
+        cmd = 'settings put global airplane_mode_on {}'
+        self.execute(cmd.format(int(boolean(mode))))
+        self.execute('am broadcast -a android.intent.action.AIRPLANE_MODE', as_root=root_required)
+
+    def get_auto_rotation(self):
+        cmd = 'settings get system accelerometer_rotation'
+        return boolean(self.execute(cmd).strip())
+
+    def set_auto_rotation(self, autorotate):
+        cmd = 'settings put system accelerometer_rotation {}'
+        self.execute(cmd.format(int(boolean(autorotate))))
+
+    def set_natural_rotation(self):
+        self.set_rotation(0)
+
+    def set_left_rotation(self):
+        self.set_rotation(1)
+
+    def set_inverted_rotation(self):
+        self.set_rotation(2)
+
+    def set_right_rotation(self):
+        self.set_rotation(3)
+
+    def get_rotation(self):
+        cmd = 'settings get system user_rotation'
+        return self.execute(cmd).strip()
+
+    def set_rotation(self, rotation):
+        if not 0 <= rotation <= 3:
+            raise ValueError('Rotation value must be between 0 and 3')
+        self.set_auto_rotation(False)
+        cmd = 'settings put system user_rotation {}'
+        self.execute(cmd.format(rotation))
 
     def homescreen(self):
         self.execute('am start -a android.intent.action.MAIN -c android.intent.category.HOME')

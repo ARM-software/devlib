@@ -412,8 +412,19 @@ class CpufreqModule(Module):
         """
         return self.target._execute_util('cpufreq_trace_all_frequencies', as_root=True)
 
+    def get_affected_cpus(self, cpu):
+        """
+        Get the online CPUs that share a frequency domain with the given CPU
+        """
+        if isinstance(cpu, int):
+            cpu = 'cpu{}'.format(cpu)
+
+        sysfile = '/sys/devices/system/cpu/{}/cpufreq/affected_cpus'.format(cpu)
+
+        return [int(c) for c in self.target.read_value(sysfile).split()]
+
     @memoized
-    def get_domain_cpus(self, cpu):
+    def get_related_cpus(self, cpu):
         """
         Get the CPUs that share a frequency domain with the given CPU
         """
@@ -431,6 +442,6 @@ class CpufreqModule(Module):
         cpus = set(range(self.target.number_of_cpus))
         while cpus:
             cpu = iter(cpus).next()
-            domain = self.target.cpufreq.get_domain_cpus(cpu)
+            domain = self.target.cpufreq.get_related_cpus(cpu)
             yield domain
             cpus = cpus.difference(domain)

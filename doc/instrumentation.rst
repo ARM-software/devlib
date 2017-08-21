@@ -114,14 +114,14 @@ Instrument
    :class:`Measurement` objects (one for each active channel).
 
    .. note:: This method is only implemented by :class:`Instrument`\ s that
-             support ``INSTANTANEOUS`` measurment.
+             support ``INSTANTANEOUS`` measurement.
 
 .. method:: Instrument.start()
 
    Starts collecting measurements from ``active_channels``.
 
    .. note:: This method is only implemented by :class:`Instrument`\ s that
-             support ``CONTINUOUS`` measurment.
+             support ``CONTINUOUS`` measurement.
 
 .. method:: Instrument.stop()
 
@@ -129,29 +129,37 @@ Instrument
    :func:`start()`.
 
    .. note:: This method is only implemented by :class:`Instrument`\ s that
-             support ``CONTINUOUS`` measurment.
+             support ``CONTINUOUS`` measurement.
 
 .. method:: Instrument.get_data(outfile)
 
    Write collected data into ``outfile``. Must be called after :func:`stop()`.
    Data will be written in CSV format with a column for each channel and a row
    for each sample. Column heading will be channel, labels in the form
-   ``<site>_<kind>`` (see :class:`InstrumentChannel`). The order of the coluns
+   ``<site>_<kind>`` (see :class:`InstrumentChannel`). The order of the columns
    will be the same as the order of channels in ``Instrument.active_channels``.
+
+   If reporting timestamps, one channel must have a ``site`` named ``"timestamp"``
+   and a ``kind`` of a :class:`MeasurmentType` of an appropriate time unit which will
+   be used, if appropriate, during any post processing.
+
+   .. note:: Currently supported time units are seconds, milliseconds and
+             microseconds, other units can also be used if an appropriate
+             conversion is provided.
 
    This returns a :class:`MeasurementCsv` instance associated with the outfile
    that can be used to stream :class:`Measurement`\ s lists (similar to what is
    returned by ``take_measurement()``.
 
    .. note:: This method is only implemented by :class:`Instrument`\ s that
-             support ``CONTINUOUS`` measurment.
+             support ``CONTINUOUS`` measurement.
 
 .. attribute:: Instrument.sample_rate_hz
 
    Sample rate of the instrument in Hz. Assumed to be the same for all channels.
 
    .. note:: This attribute is only provided by :class:`Instrument`\ s that
-             support ``CONTINUOUS`` measurment.
+             support ``CONTINUOUS`` measurement.
 
 Instrument Channel
 ~~~~~~~~~~~~~~~~~~
@@ -163,16 +171,16 @@ Instrument Channel
    ``site`` and a ``measurement_type``.
 
    A ``site`` indicates where  on the target a measurement is collected from
-   (e.g. a volage rail or location of a sensor).
+   (e.g. a voltage rail or location of a sensor).
 
    A ``measurement_type`` is an instance of :class:`MeasurmentType` that
-   describes what sort of measurment this is (power, temperature, etc). Each
-   mesurement type has a standard unit it is reported in, regardless of an
+   describes what sort of measurement this is (power, temperature, etc). Each
+   measurement type has a standard unit it is reported in, regardless of an
    instrument used to collect it.
 
    A channel (i.e. site/measurement_type combination) is unique per instrument,
    however there may be more than one channel associated with one site (e.g. for
-   both volatage and power).
+   both voltage and power).
 
    It should not be assumed that any site/measurement_type combination is valid.
    The list of available channels can queried with
@@ -180,22 +188,22 @@ Instrument Channel
 
 .. attribute:: InstrumentChannel.site
 
-   The name of the "site" from which the measurments are collected (e.g. voltage
+   The name of the "site" from which the measurements are collected (e.g. voltage
    rail, sensor, etc).
 
 .. attribute:: InstrumentChannel.kind
 
-   A string indingcating the type of measrument that will be collted. This is
+   A string indicating the type of measurement that will be collected. This is
    the ``name`` of the :class:`MeasurmentType` associated with this channel.
 
 .. attribute:: InstrumentChannel.units
 
-   Units in which measurment will be reported. this is determined by the
+   Units in which measurement will be reported. this is determined by the
    underlying :class:`MeasurmentType`.
 
 .. attribute:: InstrumentChannel.label
 
-   A label that can be attached to measurments associated with with channel.
+   A label that can be attached to measurements associated with with channel.
    This is constructed with ::
 
        '{}_{}'.format(self.site, self.kind)
@@ -211,27 +219,31 @@ be reported as "power" in Watts, and never as "pwr" in milliWatts. Currently
 defined measurement types are
 
 
-+-------------+---------+---------------+
-| name        | units   | category      |
-+=============+=========+===============+
-| time        | seconds |               |
-+-------------+---------+---------------+
-| temperature | degrees |               |
-+-------------+---------+---------------+
-| power       | watts   | power/energy  |
-+-------------+---------+---------------+
-| voltage     | volts   | power/energy  |
-+-------------+---------+---------------+
-| current     | amps    | power/energy  |
-+-------------+---------+---------------+
-| energy      | joules  | power/energy  |
-+-------------+---------+---------------+
-| tx          | bytes   | data transfer |
-+-------------+---------+---------------+
-| rx          | bytes   | data transfer |
-+-------------+---------+---------------+
-| tx/rx       | bytes   | data transfer |
-+-------------+---------+---------------+
++-------------+-------------+---------------+
+| name        | units       | category      |
++=============+=============+===============+
+| time        | seconds     |               |
++-------------+-------------+---------------+
+| time        | microseconds|               |
++-------------+-------------+---------------+
+| time        | milliseconds|               |
++-------------+-------------+---------------+
+| temperature | degrees     |               |
++-------------+-------------+---------------+
+| power       | watts       | power/energy  |
++-------------+-------------+---------------+
+| voltage     | volts       | power/energy  |
++-------------+-------------+---------------+
+| current     | amps        | power/energy  |
++-------------+-------------+---------------+
+| energy      | joules      | power/energy  |
++-------------+-------------+---------------+
+| tx          | bytes       | data transfer |
++-------------+-------------+---------------+
+| rx          | bytes       | data transfer |
++-------------+-------------+---------------+
+| tx/rx       | bytes       | data transfer |
++-------------+-------------+---------------+
 
 
 .. instruments:
