@@ -710,3 +710,54 @@ class LogcatMonitor(threading.Thread):
             return [self._found]
         else:
             raise RuntimeError('Logcat monitor timeout ({}s)'.format(timeout))
+
+class AndroidScreen(object):
+    """
+    Class encapsulating screen operations for Android devices
+    """
+    def __init__(self, target):
+        self.target = target
+
+    def get_orientation(self):
+        """
+        Get current screen orientation. Can be passed back to set_orientation.
+        """
+        accelerometer_rotation = int(self.target.execute(
+            'settings get system accelerometer_rotation'))
+        if accelerometer_rotation == 1:
+            return 'auto'
+
+        user_rotation = int(self.target.execute(
+            'settings get system user_rotation'))
+        if user_rotation == 1:
+            return 'landscape'
+        else:
+            return 'portrait'
+
+    def set_orientation(self, orientation='portrait'):
+        """
+        Set screen orientation mode
+
+        :param orientation: One of 'portrait', 'landscape' or 'auto'. Auto means
+                            use the accelerometer.
+        :type orientation: str
+        """
+        valid_orientations = ('portrait', 'landscape', 'auto')
+        if orientation not in valid_orientations:
+            raise ValueError('Invalid orientation: chose from {}'
+                             .format(valid_orientations))
+
+        if orientation == 'auto':
+            # Force portrait mode before activating auto rotation
+            self.target.execute('settings put system user_rotation 0')
+            self.target.execute('settings put system accelerometer_rotation 1')
+        else:
+            if orientation == 'landscape':
+                user_rotation = 1
+            else:
+                user_rotation = 0
+
+            # Disable automatic rotation before setting fixed orientation
+            self.target.execute('settings put system accelerometer_rotation 0')
+            self.target.execute('settings put system user_rotation {}'
+                                .format(user_rotation))

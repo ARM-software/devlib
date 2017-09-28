@@ -14,7 +14,8 @@ from devlib.module import get_module
 from devlib.platform import Platform
 from devlib.exception import TargetError, TargetNotRespondingError, TimeoutError
 from devlib.utils.ssh import SshConnection
-from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect
+from devlib.utils.android import (AdbConnection, AndroidProperties, LogcatMonitor,
+                                  adb_command, adb_disconnect, AndroidScreen)
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list, escape_double_quotes
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string
@@ -927,6 +928,7 @@ class AndroidTarget(Target):
                                             shell_prompt=shell_prompt,
                                             conn_cls=conn_cls)
         self.package_data_directory = package_data_directory
+        self.screen = AndroidScreen(self)
 
     def reset(self, fastboot=False):  # pylint: disable=arguments-differ
         try:
