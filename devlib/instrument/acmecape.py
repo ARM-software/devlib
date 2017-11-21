@@ -7,6 +7,7 @@ import tempfile
 from fcntl import fcntl, F_GETFL, F_SETFL
 from string import Template
 from subprocess import Popen, PIPE, STDOUT
+from signal import SIGTERM
 
 from devlib import Instrument, CONTINUOUS, MeasurementsCsv
 from devlib.exception import HostError
@@ -81,27 +82,41 @@ class AcmeCapeInstrument(Instrument):
         self.process = Popen(self.command.split(), stdout=PIPE, stderr=STDOUT)
 
     def stop(self):
-        self.process.terminate()
+        still_running = True
+        self.logger.info('Terminating iio-capture [%d] instance',
+                         self.process.pid)
         timeout_secs = 10
         output = ''
+        # Gracefully terminate the process (SIGTERM)
         for _ in xrange(timeout_secs):
-            if self.process.poll() is not None:
-                break
+            self.process.terminate()
             time.sleep(1)
+            if self.process.poll() is not None:
+                still_running = False
+                break
         else:
             output += _read_nonblock(self.process.stdout)
-            self.process.kill()
-            self.logger.error('iio-capture did not terminate gracefully')
-            if self.process.poll() is None:
+            # Kill a non responing process (SIGKILL)
+            for _ in xrange(timeout_secs):
+                self.process.kill()
+                time.sleep(1)
+                if self.process.poll() is not None:
+                    still_running = False
+                    break
+            else:
+                self.logger.error('iio-capture did not terminate gracefully')
                 msg = 'Could not terminate iio-capture:\n{}'
                 raise HostError(msg.format(output))
-        if self.process.returncode != 15: # iio-capture exits with 15 when killed
+
+        # iio-capture returns the signal sent to stop it
+        if still_running:
             output += self.process.stdout.read()
             self.logger.info('ACME instrument encountered an error, '
                              'you may want to try rebooting the ACME device:\n'
                              '  ssh root@{} reboot'.format(self.host))
             raise HostError('iio-capture exited with an error ({}), output:\n{}'
                             .format(self.process.returncode, output))
+
         if not os.path.isfile(self.raw_data_file):
             raise HostError('Output CSV not generated.')
         self.process = None
