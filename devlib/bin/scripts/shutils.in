@@ -157,7 +157,7 @@ cgroups_tasks_move() {
 
 	[ "x$FILTERS" = "x" ] && exit 0
 
-	PIDS=`$PS -o comm,pid | $GREP $FILTERS | $AWK '{print $2}'`
+	PIDS=`$PS -o comm,pid,args | $GREP $FILTERS | $AWK '{print $2}'`
 	PIDS=`echo $PIDS`
 	echo "PIDs to save: [$PIDS]"
 	for TID in $PIDS; do
@@ -183,7 +183,7 @@ cgroups_freezer_set_state() {
 
     # Set the state of the freezer
     echo $STATE > $SYSFS_ENTRY
-    
+
     # And check it applied cleanly
     for i in `seq 1 10`; do
         [ $($CAT $SYSFS_ENTRY) = $STATE ] && exit 0
