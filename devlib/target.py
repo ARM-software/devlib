@@ -1214,6 +1214,8 @@ class AndroidTarget(Target):
                 pass # Ignore if unknown
             elif 'has not requested permission' in e.message:
                 pass # Ignore if not requested
+            elif 'Operation not allowed' in e.message:
+                pass # Ignore if not allowed
             else:
                 raise
 
