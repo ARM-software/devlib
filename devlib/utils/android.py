@@ -496,7 +496,7 @@ def _initialize_with_android_home(env):
     logger.debug('Using ANDROID_HOME from the environment.')
     env.android_home = android_home
     env.platform_tools = os.path.join(android_home, 'platform-tools')
-    os.environ['PATH'] = env.platform_tools + os.pathsep + os.environ['PATH']
+    os.environ['PATH'] = os.environ['PATH'] + os.pathsep + env.platform_tools
     _init_common(env)
     return env
 
