@@ -238,6 +238,19 @@ hotplug_online_all() {
     done
 }
 
+
+################################################################################
+# Scheduler
+################################################################################
+
+sched_get_kernel_attributes() {
+	MATCH=${1:-'.*'}
+	[ -d /proc/sys/kernel/ ] || exit 1
+	$GREP '' /proc/sys/kernel/sched_* | \
+		$SED -e 's|/proc/sys/kernel/sched_||' | \
+		$GREP -e "$MATCH"
+}
+
 ################################################################################
 # Misc
 ################################################################################
@@ -343,6 +356,9 @@ get_linux_system_id)
 get_android_system_id)
 	get_android_system_id $*
     ;;
+sched_get_kernel_attributes)
+	sched_get_kernel_attributes $*
+	;;
 *)
     echo "Command [$CMD] not supported"
     exit -1
