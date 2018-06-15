@@ -21,6 +21,7 @@ from past.builtins import basestring
 
 from devlib.module import Module
 from devlib.utils.misc import memoized
+from devlib.utils.types import boolean
 
 
 class SchedProcFSNode(object):
@@ -304,6 +305,57 @@ class SchedModule(Module):
             value = str(value)
         path = '/proc/sys/kernel/sched_' + attr
         self.target.write_value(path, value, verify)
+
+    @property
+    @memoized
+    def has_debug(self):
+        if self.target.config.get('SCHED_DEBUG') != 'y':
+            return False;
+        return self.target.file_exists('/sys/kernel/debug/sched_features')
+
+    def get_features(self):
+        """
+        Get the status of each sched feature
+
+        :returns: a dictionary of features and their "is enabled" status
+        """
+        if not self.has_debug:
+            raise RuntimeError("sched_features not available")
+        feats = self.target.read_value('/sys/kernel/debug/sched_features')
+        features = {}
+        for feat in feats.split():
+            value = True
+            if feat.startswith('NO'):
+                feat = feat.replace('NO_', '', 1)
+                value = False
+            features[feat] = value
+        return features
+
+    def set_feature(self, feature, enable, verify=True):
+        """
+        Set the status of a specified scheduler feature
+
+        :param feature: the feature name to set
+        :param enable: true to enable the feature, false otherwise
+
+        :raise ValueError: if the specified enable value is not bool
+        :raise RuntimeError: if the specified feature cannot be set
+        """
+        if not self.has_debug:
+            raise RuntimeError("sched_features not available")
+        feature = feature.upper()
+        feat_value = feature
+        if not boolean(enable):
+            feat_value = 'NO_' + feat_value
+        self.target.write_value('/sys/kernel/debug/sched_features',
+                                feat_value, verify=False)
+        if not verify:
+            return
+        msg = 'Failed to set {}, feature not supported?'.format(feat_value)
+        features = self.get_features()
+        feat_value = features.get(feature, not enable)
+        if feat_value != enable:
+            raise RuntimeError(msg)
 
     def get_cpu_sd_info(self, cpu):
         """
