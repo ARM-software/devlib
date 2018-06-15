@@ -253,6 +253,58 @@ class SchedModule(Module):
 
         return SchedProcFSData.available(target)
 
+    def get_kernel_attributes(self, matching=None, check_exit_code=True):
+        """
+        Get the value of scheduler attributes.
+
+        :param matching: an (optional) substring to filter the scheduler
+        attributes to be returned.
+
+        The scheduler exposes a list of tunable attributes under:
+            /proc/sys/kernel
+        all starting with the "sched_" prefix.
+
+        This method returns a dictionary of all the "sched_" attributes exposed
+        by the target kernel, within the prefix removed.
+        It's possible to restrict the list of attributes by specifying a
+        substring to be matched.
+
+        returns: a dictionary of scheduler tunables
+        """
+        command = 'sched_get_kernel_attributes {}'.format(
+            matching if matching else ''
+        )
+        output = self.target._execute_util(command, as_root=self.target.is_rooted,
+                                           check_exit_code=check_exit_code)
+        result = {}
+        for entry in output.strip().split('\n'):
+            if ':' not in entry:
+                continue
+            path, value = entry.strip().split(':', 1)
+            if value in ['0', '1']:
+                value = bool(int(value))
+            elif value.isdigit():
+                value = int(value)
+            result[path] = value
+        return result
+
+    def set_kernel_attribute(self, attr, value, verify=True):
+        """
+        Set the value of a scheduler attribute.
+
+        :param attr: the attribute to set, without the "sched_" prefix
+        :param value: the value to set
+        :param verify: true to check that the requested value has been set
+
+        :raise TargetError: if the attribute cannot be set
+        """
+        if isinstance(value, bool):
+            value = '1' if value else '0'
+        elif isinstance(value, int):
+            value = str(value)
+        path = '/proc/sys/kernel/sched_' + attr
+        self.target.write_value(path, value, verify)
+
     def get_cpu_sd_info(self, cpu):
         """
         :returns: An object view of /proc/sys/kernel/sched_domain/cpu<cpu>/*
