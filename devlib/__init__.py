@@ -34,6 +34,7 @@ from devlib.instrument.hwmon import HwmonInstrument
 from devlib.instrument.monsoon import MonsoonInstrument
 from devlib.instrument.netstats import NetstatsInstrument
 from devlib.instrument.gem5power import Gem5PowerInstrument
+from devlib.instrument.schedstats import SchedstatsInstrument
 
 from devlib.derived import DerivedMeasurements, DerivedMetric
 from devlib.derived.energy import DerivedEnergyMeasurements
