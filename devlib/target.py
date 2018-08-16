@@ -660,7 +660,8 @@ class Target(object):
             if ':' not in entry:
                 continue
             path, value = entry.strip().split(':', 1)
-            result[path] = value
+            if path not in result:
+                result[path] = value
         return result
 
     def read_tree_values(self, path, depth=1, dictcls=dict, check_exit_code=True):
