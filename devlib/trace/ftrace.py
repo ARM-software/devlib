@@ -276,7 +276,7 @@ class FtraceCollector(TraceCollector):
         # To get the output of trace.dat, trace-cmd must be installed
         # This is done host-side because the generated file is very large
         try:
-            command = '{} report {} > {}'.format(self.host_binary, binfile, destfile)
+            command = '{} report {} > {}'.format(self.target_binary, binfile, destfile)
             self.logger.debug(command)
             process = subprocess.Popen(command, stderr=subprocess.PIPE, shell=True)
             _, error = process.communicate()
