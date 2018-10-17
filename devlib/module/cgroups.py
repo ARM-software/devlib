@@ -302,7 +302,8 @@ class CGroup(object):
 
         return conf
 
-    def set(self, **attrs):
+    def set(self, *args, **attrs):
+        attrs.update(args)
         for idx in attrs:
             if isiterable(attrs[idx]):
                 attrs[idx] = list_to_ranges(attrs[idx])
