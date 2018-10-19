@@ -63,11 +63,7 @@ class SystraceCollector(TraceCollector):
             [self.systrace_binary, '-l'], universal_newlines=True
         ).splitlines()
 
-        categories = []
-        for line in lines:
-            categories.append(line.split()[0])
-
-        return categories
+        return [line.split()[0] for line in lines if line]
 
     def __init__(self, target,
                  categories=None,
