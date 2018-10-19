@@ -43,8 +43,7 @@ from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_s
 FSTAB_ENTRY_REGEX = re.compile(r'(\S+) on (.+) type (\S+) \((\S+)\)')
 ANDROID_SCREEN_STATE_REGEX = re.compile('(?:mPowerState|mScreenOn|Display Power: state)=([0-9]+|true|false|ON|OFF)',
                                         re.IGNORECASE)
-ANDROID_SCREEN_RESOLUTION_REGEX = re.compile(r'mUnrestrictedScreen=\(\d+,\d+\)'
-                                             r'\s+(?P<width>\d+)x(?P<height>\d+)')
+ANDROID_SCREEN_RESOLUTION_REGEX = re.compile(r'cur=(?P<width>\d+)x(?P<height>\d+)')
 DEFAULT_SHELL_PROMPT = re.compile(r'^.*(shell|root|juno)@?.*:[/~]\S* *[#$] ',
                                   re.MULTILINE)
 KVERSION_REGEX = re.compile(
@@ -1042,7 +1041,7 @@ class AndroidTarget(Target):
     @property
     @memoized
     def screen_resolution(self):
-        output = self.execute('dumpsys window')
+        output = self.execute('dumpsys window displays')
         match = ANDROID_SCREEN_RESOLUTION_REGEX.search(output)
         if match:
             return (int(match.group('width')),
