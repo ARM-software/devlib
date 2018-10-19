@@ -59,7 +59,9 @@ class SystraceCollector(TraceCollector):
     @property
     @memoized
     def available_categories(self):
-        lines = subprocess.check_output([self.systrace_binary, '-l']).splitlines()
+        lines = subprocess.check_output(
+            [self.systrace_binary, '-l'], universal_newlines=True
+        ).splitlines()
 
         categories = []
         for line in lines:
@@ -139,7 +141,8 @@ class SystraceCollector(TraceCollector):
         self._systrace_process = subprocess.Popen(
             self.systrace_cmd,
             stdin=subprocess.PIPE,
-            shell=True
+            shell=True,
+            universal_newlines=True
         )
 
     def stop(self):
