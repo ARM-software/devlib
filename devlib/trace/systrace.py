@@ -21,7 +21,7 @@ from tempfile import NamedTemporaryFile
 
 from devlib.exception import TargetStableError, HostError
 from devlib.trace import TraceCollector
-from devlib.utils.android import platform_tools
+import devlib.utils.android
 from devlib.utils.misc import memoized
 
 
@@ -83,6 +83,7 @@ class SystraceCollector(TraceCollector):
         # Try to find a systrace binary
         self.systrace_binary = None
 
+        platform_tools = devlib.utils.android.platform_tools
         systrace_binary_path = os.path.join(platform_tools, 'systrace', 'systrace.py')
         if not os.path.isfile(systrace_binary_path):
             raise HostError('Could not find any systrace binary under {}'.format(platform_tools))
