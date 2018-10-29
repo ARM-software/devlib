@@ -140,10 +140,13 @@ class Target(object):
     def number_of_cpus(self):
         num_cpus = 0
         corere = re.compile(r'^\s*cpu\d+\s*$')
-        output = self.execute('ls /sys/devices/system/cpu')
+        output = self.execute('ls --color=never /sys/devices/system/cpu')
         for entry in output.split():
             if corere.match(entry):
                 num_cpus += 1
+
+        if not num_cpus:
+            raise TargetStableError('The number of CPUs cannot be null')
         return num_cpus
 
     @property
