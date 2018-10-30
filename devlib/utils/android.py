@@ -28,10 +28,10 @@ import tempfile
 import subprocess
 from collections import defaultdict
 import pexpect
+from pipes import quote
 
 from devlib.exception import TargetTransientError, TargetStableError, HostError
 from devlib.utils.misc import check_output, which, ABI_MAP
-from devlib.utils.misc import escape_single_quotes, escape_double_quotes
 
 
 logger = logging.getLogger('android')
@@ -383,7 +383,7 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
               as_root=False, adb_server=None):  # NOQA
     _check_env()
     if as_root:
-        command = 'echo \'{}\' | su'.format(escape_single_quotes(command))
+        command = 'echo {} | su'.format(quote(command))
     device_part = []
     if adb_server:
         device_part = ['-H', adb_server]
@@ -443,9 +443,9 @@ def adb_background_shell(device, command,
     """Runs the sepcified command in a subprocess, returning the the Popen object."""
     _check_env()
     if as_root:
-        command = 'echo \'{}\' | su'.format(escape_single_quotes(command))
+        command = 'echo {} | su'.format(quote(command))
     device_string = ' -s {}'.format(device) if device else ''
-    full_command = 'adb{} shell "{}"'.format(device_string, escape_double_quotes(command))
+    full_command = 'adb{} shell {}'.format(device_string, quote(command))
     logger.debug(full_command)
     return subprocess.Popen(full_command, stdout=stdout, stderr=stderr, shell=True)
 
