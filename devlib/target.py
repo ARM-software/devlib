@@ -362,9 +362,10 @@ class Target(object):
     # execution
 
     def execute(self, command, timeout=None, check_exit_code=True,
-                as_root=False, will_succeed=False):
-        return self.conn.execute(command, timeout, check_exit_code, as_root,
-                will_succeed)
+                as_root=False, strip_colors=True, will_succeed=False):
+        return self.conn.execute(command, timeout=timeout,
+                check_exit_code=check_exit_code, as_root=as_root,
+                strip_colors=strip_colors, will_succeed=will_succeed)
 
     def background(self, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, as_root=False):
         return self.conn.background(command, stdout, stderr, as_root)
