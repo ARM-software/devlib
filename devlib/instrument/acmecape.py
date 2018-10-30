@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import tempfile
+import shlex
 from fcntl import fcntl, F_GETFL, F_SETFL
 from string import Template
 from subprocess import Popen, PIPE, STDOUT
@@ -95,7 +96,7 @@ class AcmeCapeInstrument(Instrument):
         self.logger.debug('ACME cape command: {}'.format(self.command))
 
     def start(self):
-        self.process = Popen(self.command.split(), stdout=PIPE, stderr=STDOUT)
+        self.process = Popen(shlex.split(self.command), stdout=PIPE, stderr=STDOUT)
 
     def stop(self):
         self.process.terminate()
