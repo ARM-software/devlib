@@ -22,6 +22,7 @@ import tempfile
 from fcntl import fcntl, F_GETFL, F_SETFL
 from string import Template
 from subprocess import Popen, PIPE, STDOUT
+from pipes import quote
 
 from devlib import Instrument, CONTINUOUS, MeasurementsCsv
 from devlib.exception import HostError
@@ -89,6 +90,7 @@ class AcmeCapeInstrument(Instrument):
             iio_device=self.iio_device,
             outfile=self.raw_data_file
         )
+        params = {k: quote(v) for k, v in params.items()}
         self.command = IIOCAP_CMD_TEMPLATE.substitute(**params)
         self.logger.debug('ACME cape command: {}'.format(self.command))
 

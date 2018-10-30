@@ -18,6 +18,7 @@ import subprocess
 import shutil
 import time
 import types
+from pipes import quote
 
 from devlib.exception import TargetStableError
 from devlib.host import PACKAGE_BIN_DIRECTORY
@@ -129,7 +130,7 @@ class Gem5SimulationPlatform(Platform):
             self.logger.info("Starting the gem5 simulator")
 
             command_line = "{} --outdir={} {} {}".format(self.gem5args_binary,
-                                                         self.gem5_out_dir,
+                                                         quote(self.gem5_out_dir),
                                                          self.gem5args_args,
                                                          self.gem5args_virtio)
             self.logger.debug("gem5 command line: {}".format(command_line))
