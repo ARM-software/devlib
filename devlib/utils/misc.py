@@ -429,22 +429,38 @@ def sanitize_cmd_template(cmd):
     return cmd
 
 def escape_quotes(text):
-    """Escape quotes, and escaped quotes, in the specified text."""
+    """
+    Escape quotes, and escaped quotes, in the specified text.
+
+    .. note:: :func:`pipes.quote` should be favored where possible.
+    """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\'', '\\\'').replace('\"', '\\\"')
 
 
 def escape_single_quotes(text):
-    """Escape single quotes, and escaped single quotes, in the specified text."""
+    """
+    Escape single quotes, and escaped single quotes, in the specified text.
+
+    .. note:: :func:`pipes.quote` should be favored where possible.
+    """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\'', '\'\\\'\'')
 
 
 def escape_double_quotes(text):
-    """Escape double quotes, and escaped double quotes, in the specified text."""
+    """
+    Escape double quotes, and escaped double quotes, in the specified text.
+
+    .. note:: :func:`pipes.quote` should be favored where possible.
+    """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\"', '\\\"')
 
 
 def escape_spaces(text):
-    """Escape spaces in the specified text"""
+    """
+    Escape spaces in the specified text
+
+    .. note:: :func:`pipes.quote` should be favored where possible.
+    """
     return text.replace(' ', '\ ')
 
 

@@ -26,6 +26,7 @@ import threading
 import xml.dom.minidom
 import copy
 from collections import namedtuple, defaultdict
+from pipes import quote
 
 from devlib.host import LocalConnection, PACKAGE_BIN_DIRECTORY
 from devlib.module import get_module
@@ -36,7 +37,7 @@ from devlib.exception import (DevlibTransientError, TargetStableError,
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines
-from devlib.utils.misc import commonprefix, escape_double_quotes, merge_lists
+from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string, bytes_regex
 
@@ -555,7 +556,7 @@ class Target(object):
         raise IOError('No usable temporary filename found')
 
     def remove(self, path, as_root=False):
-        self.execute('rm -rf "{}"'.format(escape_double_quotes(path)), as_root=as_root)
+        self.execute('rm -rf {}'.format(quote(path)), as_root=as_root)
 
     # misc
     def core_cpus(self, core):
@@ -891,7 +892,7 @@ class LinuxTarget(Target):
         pass
 
     def kick_off(self, command, as_root=False):
-        command = 'sh -c "{}" 1>/dev/null 2>/dev/null &'.format(escape_double_quotes(command))
+        command = 'sh -c {} 1>/dev/null 2>/dev/null &'.format(quote(command))
         return self.conn.execute(command, as_root=as_root)
 
     def get_pids_of(self, process_name):
@@ -925,7 +926,7 @@ class LinuxTarget(Target):
             return filtered_result
 
     def list_directory(self, path, as_root=False):
-        contents = self.execute('ls -1 "{}"'.format(escape_double_quotes(path)), as_root=as_root)
+        contents = self.execute('ls -1 {}'.format(quote(path)), as_root=as_root)
         return [x.strip() for x in contents.split('\n') if x.strip()]
 
     def install(self, filepath, timeout=None, with_name=None):  # pylint: disable=W0221
@@ -1522,13 +1523,13 @@ class AndroidTarget(Target):
             if it is already running
         :type force_new: bool
         """
-        cmd = 'am start -a android.intent.action.VIEW -d "{}"'
+        cmd = 'am start -a android.intent.action.VIEW -d {}'
 
         if force_new:
             cmd = cmd + ' -f {}'.format(INTENT_FLAGS['ACTIVITY_NEW_TASK'] |
                                         INTENT_FLAGS['ACTIVITY_CLEAR_TASK'])
 
-        self.execute(cmd.format(escape_double_quotes(url)))
+        self.execute(cmd.format(quote(url)))
 
     def homescreen(self):
         self.execute('am start -a android.intent.action.MAIN -c android.intent.category.HOME')

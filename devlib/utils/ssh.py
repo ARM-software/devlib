@@ -41,8 +41,6 @@ from pexpect import EOF, TIMEOUT, spawn
 from devlib.exception import (HostError, TargetStableError, TargetNotRespondingError,
                               TimeoutError, TargetTransientError)
 from devlib.utils.misc import which, strip_bash_colors, check_output, sanitize_cmd_template
-from devlib.utils.misc import (escape_single_quotes, escape_double_quotes,
-                               escape_spaces)
 from devlib.utils.types import boolean
 
 
@@ -265,7 +263,7 @@ class SshConnection(object):
             # As we're already root, there is no need to use sudo.
             as_root = False
         if as_root:
-            command = self.sudo_cmd.format(escape_single_quotes(command))
+            command = self.sudo_cmd.format(quote(command))
             if log:
                 logger.debug(command)
             self.conn.sendline(command)
@@ -758,7 +756,7 @@ class Gem5Connection(TelnetConnection):
         gem5_logger.debug("gem5_shell command: {}".format(command))
 
         if as_root:
-            command = 'echo "{}" | su'.format(escape_double_quotes(command))
+            command = 'echo {} | su'.format(quote(command))
 
         # Send the actual command
         self.conn.send("{}\n".format(command))
