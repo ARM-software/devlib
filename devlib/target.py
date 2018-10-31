@@ -24,6 +24,7 @@ import tarfile
 import tempfile
 import threading
 import xml.dom.minidom
+import copy
 from collections import namedtuple, defaultdict
 
 from devlib.host import LocalConnection, PACKAGE_BIN_DIRECTORY
@@ -741,18 +742,19 @@ class Target(object):
         return extracted
 
     def _update_modules(self, stage):
-        for mod in self.modules:
-            if isinstance(mod, dict):
-                mod, params = list(mod.items())[0]
+        for mod_name in copy.copy(self.modules):
+            if isinstance(mod_name, dict):
+                mod_name, params = list(mod_name.items())[0]
             else:
                 params = {}
-            mod = get_module(mod)
+            mod = get_module(mod_name)
             if not mod.stage == stage:
                 continue
             if mod.probe(self):
                 self._install_module(mod, **params)
             else:
                 msg = 'Module {} is not supported by the target'.format(mod.name)
+                self.modules.remove(mod_name)
                 if self.load_default_modules:
                     self.logger.debug(msg)
                 else:
