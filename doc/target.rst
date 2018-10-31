@@ -249,8 +249,8 @@ Target
        most ANSI escape sequences striped out before returning.
    :param will_succeed: The command is assumed to always succeed, unless there is
        an issue in the environment like the loss of network connectivity. That
-       will make the method always raise an instance of a subclass of 
-       :class:`DevlibTransientError' when the command fails, instead of a
+       will make the method always raise an instance of a subclass of
+       :class:`DevlibTransientError` when the command fails, instead of a
        :class:`DevlibStableError`.
 
 .. method:: Target.background(command [, stdout [, stderr [, as_root]]])
