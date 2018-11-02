@@ -166,6 +166,12 @@ class Target(object):
         return self.getenv('USER')
 
     @property
+    @memoized
+    def page_size_kb(self):
+        cmd = "cat /proc/self/smaps | {0} grep KernelPageSize | {0} head -n 1 | {0} awk '{{ print $2 }}'"
+        return int(self.execute(cmd.format(self.busybox)))
+
+    @property
     def conn(self):
         if self._connections:
             tid = id(threading.current_thread())
