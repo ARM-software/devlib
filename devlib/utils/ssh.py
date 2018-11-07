@@ -205,9 +205,13 @@ class SshConnection(object):
         try:
             with self.lock:
                 _command = '({}); __devlib_ec=$?; echo; echo $__devlib_ec'.format(command)
-                raw_output = self._execute_and_wait_for_prompt(
-                    _command, timeout, as_root, strip_colors)
-                output, exit_code_text, _ = raw_output.rsplit('\r\n', 2)
+                full_output = self._execute_and_wait_for_prompt(_command, timeout, as_root, strip_colors)
+                split_output = full_output.rsplit('\r\n', 2)
+                try:
+                    output, exit_code_text, _ = split_output
+                except ValueError as e:
+                    raise TargetStableError(
+                        "cannot split reply (target misconfiguration?):\n'{}'".format(full_output))
                 if check_exit_code:
                     try:
                         exit_code = int(exit_code_text)
