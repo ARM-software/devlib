@@ -653,7 +653,7 @@ def memoized(wrapped, instance, args, kwargs):  # pylint: disable=unused-argumen
 
     def memoize_wrapper(*args, **kwargs):
         id_string = func_id + ','.join([__get_memo_id(a) for a in  args])
-        id_string += ','.join('{}={}'.format(k, v)
+        id_string += ','.join('{}={}'.format(k, __get_memo_id(v))
                               for k, v in kwargs.items())
         if id_string not in __memo_cache:
             __memo_cache[id_string] = wrapped(*args, **kwargs)
