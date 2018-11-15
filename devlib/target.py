@@ -45,6 +45,7 @@ FSTAB_ENTRY_REGEX = re.compile(r'(\S+) on (.+) type (\S+) \((\S+)\)')
 ANDROID_SCREEN_STATE_REGEX = re.compile('(?:mPowerState|mScreenOn|Display Power: state)=([0-9]+|true|false|ON|OFF)',
                                         re.IGNORECASE)
 ANDROID_SCREEN_RESOLUTION_REGEX = re.compile(r'cur=(?P<width>\d+)x(?P<height>\d+)')
+ANDROID_SCREEN_ROTATION_REGEX = re.compile(r'orientation=(?P<rotation>[0-3])')
 DEFAULT_SHELL_PROMPT = re.compile(r'^.*(shell|root|juno)@?.*:[/~]\S* *[#$] ',
                                   re.MULTILINE)
 KVERSION_REGEX = re.compile(
@@ -1495,11 +1496,11 @@ class AndroidTarget(Target):
         self.set_rotation(3)
 
     def get_rotation(self):
-        cmd = 'settings get system user_rotation'
-        res = self.execute(cmd).strip()
-        try:
-            return int(res)
-        except ValueError:
+        output = self.execute('dumpsys input')
+        match = ANDROID_SCREEN_ROTATION_REGEX.search(output)
+        if match:
+            return int(match.group('rotation'))
+        else:
             return None
 
     def set_rotation(self, rotation):
