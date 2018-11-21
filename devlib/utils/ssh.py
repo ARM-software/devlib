@@ -27,6 +27,7 @@ import sys
 import time
 import atexit
 from pipes import quote
+from future.utils import raise_from
 
 # pylint: disable=import-error,wrong-import-position,ungrouped-imports,wrong-import-order
 import pexpect
@@ -315,8 +316,8 @@ class SshConnection(object):
         try:
             check_output(command, timeout=timeout, shell=True)
         except subprocess.CalledProcessError as e:
-            raise HostError("Failed to copy file with '{}'. Output:\n{}".format(
-                command_redacted, e.output))
+            raise_from(HostError("Failed to copy file with '{}'. Output:\n{}".format(
+                command_redacted, e.output)), None)
         except TimeoutError as e:
             raise TimeoutError(command_redacted, e.output)
 
