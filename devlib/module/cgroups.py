@@ -432,16 +432,20 @@ class CgroupsModule(Module):
                 .format(self.cgroup_root, self.target.shutils,
                         cgroup, cmdline)
 
-    def run_into(self, cgroup, cmdline):
+    def run_into(self, cgroup, cmdline, as_root=None):
         """
         Run the specified command into the specified CGroup
 
         :param cmdline: Command to be run into cgroup
         :param cgroup: Name of cgroup to run command into
+        :param as_root: Specify whether to run the command as root, if not
+                        specified will default to whether the target is rooted.
         :returns: Output of command.
         """
+        if as_root is None:
+            as_root = self.target.is_rooted
         cmd = self.run_into_cmd(cgroup, cmdline)
-        raw_output = self.target.execute(cmd)
+        raw_output = self.target.execute(cmd, as_root=as_root)
 
         # First line of output comes from shutils; strip it out.
         return raw_output.split('\n', 1)[1]
