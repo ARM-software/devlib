@@ -1738,16 +1738,21 @@ class KernelConfig(object):
 
     def __init__(self, text):
         self.text = text
-        self._config = {}
+        self._config = self._parse_text(text)
+
+    @classmethod
+    def _parse_text(cls, text):
+        config = {}
         for line in text.split('\n'):
             line = line.strip()
             if line.startswith('#'):
-                match = self.not_set_regex.search(line)
+                match = cls.not_set_regex.search(line)
                 if match:
-                    self._config[match.group(1)] = 'n'
+                    config[match.group(1)] = 'n'
             elif '=' in line:
                 name, value = line.split('=', 1)
-                self._config[name.strip()] = value.strip()
+                config[name.strip()] = value.strip()
+        return config
 
     def get(self, name, strict=False):
         name = self.get_config_name(name)
