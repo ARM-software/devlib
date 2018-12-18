@@ -28,6 +28,9 @@ import tempfile
 import subprocess
 from collections import defaultdict
 import pexpect
+import xml.etree.ElementTree
+import zipfile
+
 from pipes import quote
 
 from devlib.exception import TargetTransientError, TargetStableError, HostError
@@ -183,6 +186,7 @@ class ApkInfo(object):
 
         self._apk_path = apk_path
         self._activities = None
+        self._methods = None
 
     @property
     def activities(self):
@@ -192,6 +196,26 @@ class ApkInfo(object):
             matched_activities = self.activity_regex.finditer(self._run(cmd))
             self._activities = [m.group('name') for m in matched_activities]
         return self._activities
+
+    @property
+    def methods(self):
+        if self._methods is None:
+            with zipfile.ZipFile(self._apk_path, 'r') as z:
+                extracted = z.extract('classes.dex', tempfile.gettempdir())
+
+            dexdump = os.path.join(os.path.dirname(aapt), 'dexdump')
+            command = [dexdump, '-l', 'xml', extracted]
+            dump = self._run(command)
+
+            xml_tree = xml.etree.ElementTree.fromstring(dump)
+
+            package = next(i for i in xml_tree.iter('package')
+                           if i.attrib['name'] == self.package)
+
+            self._methods = [(meth.attrib['name'], klass.attrib['name'])
+                             for klass in package.iter('class')
+                             for meth in klass.iter('method')]
+        return self._methods
 
     def _run(self, command):
         logger.debug(' '.join(command))
