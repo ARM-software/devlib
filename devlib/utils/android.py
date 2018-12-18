@@ -132,6 +132,7 @@ class ApkInfo(object):
     version_regex = re.compile(r"name='(?P<name>[^']+)' versionCode='(?P<vcode>[^']+)' versionName='(?P<vname>[^']+)'")
     name_regex = re.compile(r"name='(?P<name>[^']+)'")
     permission_regex = re.compile(r"name='(?P<permission>[^']+)'")
+    activity_regex = re.compile(r'\s*A:\s*android:name\(0x\d+\)=".(?P<name>\w+)"')
 
     def __init__(self, path=None):
         self.path = path
@@ -179,6 +180,18 @@ class ApkInfo(object):
                     self.permissions.append(match.group('permission'))
             else:
                 pass  # not interested
+
+        self._apk_path = apk_path
+        self._activities = None
+
+    @property
+    def activities(self):
+        if self._activities is None:
+            cmd = [aapt, 'dump', 'xmltree', self._apk_path,
+                   'AndroidManifest.xml']
+            matched_activities = self.activity_regex.finditer(self._run(cmd))
+            self._activities = [m.group('name') for m in matched_activities]
+        return self._activities
 
     def _run(self, command):
         logger.debug(' '.join(command))
