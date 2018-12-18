@@ -147,15 +147,7 @@ class ApkInfo(object):
     # pylint: disable=too-many-branches
     def parse(self, apk_path):
         _check_env()
-        command = [aapt, 'dump', 'badging', apk_path]
-        logger.debug(' '.join(command))
-        try:
-            output = subprocess.check_output(command, stderr=subprocess.STDOUT)
-            if sys.version_info[0] == 3:
-                output = output.decode(sys.stdout.encoding or 'utf-8', 'replace')
-        except subprocess.CalledProcessError as e:
-            raise HostError('Error parsing APK file {}. `aapt` says:\n{}'
-                            .format(apk_path, e.output))
+        output = self._run([aapt, 'dump', 'badging', apk_path])
         for line in output.split('\n'):
             if line.startswith('application-label:'):
                 self.label = line.split(':')[1].strip().replace('\'', '')
@@ -187,6 +179,17 @@ class ApkInfo(object):
                     self.permissions.append(match.group('permission'))
             else:
                 pass  # not interested
+
+    def _run(self, command):
+        logger.debug(' '.join(command))
+        try:
+            output = subprocess.check_output(command, stderr=subprocess.STDOUT)
+            if sys.version_info[0] == 3:
+                output = output.decode(sys.stdout.encoding or 'utf-8', 'replace')
+        except subprocess.CalledProcessError as e:
+            raise HostError('Error while running "{}":\n{}'
+                            .format(command, e.output))
+        return output
 
 
 class AdbConnection(object):
