@@ -262,8 +262,9 @@ class CGroup(object):
 
         # Control cgroup path
         self.directory = controller.mount_point
+
         if name != '/':
-            self.directory = self.target.path.join(controller.mount_point, name[1:])
+            self.directory = self.target.path.join(controller.mount_point, name.strip('/'))
 
         # Setup path for tasks file
         self.tasks_file = self.target.path.join(self.directory, 'tasks')
