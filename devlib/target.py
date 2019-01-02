@@ -36,7 +36,7 @@ from devlib.module import get_module
 from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
-                              TargetTransientError) # pylint: disable=redefined-builtin
+                              TargetTransientError, KernelConfigKeyError) # pylint: disable=redefined-builtin
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines
@@ -1810,7 +1810,10 @@ class KernelConfig(object):
         res = self._config.get(name)
 
         if not res and strict:
-            raise IndexError("{} is not exposed in target's config")
+            raise KernelConfigKeyError(
+                "{} is not exposed in kernel config".format(name),
+                name
+            )
 
         return self._config.get(name)
 
