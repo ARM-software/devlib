@@ -54,7 +54,7 @@ class FrameCollector(threading.Thread):
         self.header = None
 
     def run(self):
-        logger.debug('Surface flinger frame data collection started.')
+        logger.debug('Frame data collection started.')
         try:
             self.stop_signal.clear()
             fd, self.temp_file = tempfile.mkstemp()
@@ -71,7 +71,7 @@ class FrameCollector(threading.Thread):
         except Exception as e:  # pylint: disable=W0703
             logger.warning('Exception on collector thread: {}({})'.format(e.__class__.__name__, e))
             self.exc = WorkerThreadError(self.name, sys.exc_info())
-        logger.debug('Surface flinger frame data collection stopped.')
+        logger.debug('Frame data collection stopped.')
 
     def stop(self):
         self.stop_signal.set()
