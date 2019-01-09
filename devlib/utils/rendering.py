@@ -49,7 +49,7 @@ class FrameCollector(threading.Thread):
         self.refresh_period = None
         self.drop_threshold = None
         self.unresponsive_count = 0
-        self.last_ready_time = None
+        self.last_ready_time = 0
         self.exc = None
         self.header = None
 
