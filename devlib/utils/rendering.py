@@ -133,7 +133,7 @@ class SurfaceFlingerFrameCollector(FrameCollector):
     def collect_frames(self, wfh):
         for activity in self.list():
             if activity == self.view:
-                wfh.write(self.get_latencies(activity))
+                wfh.write(self.get_latencies(activity).encode('utf-8'))
 
     def clear(self):
         self.target.execute('dumpsys SurfaceFlinger --latency-clear ')
