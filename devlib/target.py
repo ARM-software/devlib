@@ -121,6 +121,9 @@ class Target(object):
     def kernel_version(self):
         return KernelVersion(self.execute('{} uname -r -v'.format(quote(self.busybox))).strip())
 
+    def mount_points(self):
+        return MountPoints(self)
+
     @property
     def os_version(self):  # pylint: disable=no-self-use
         return {}
@@ -1655,6 +1658,107 @@ class Cpuinfo(object):
         return 'CpuInfo({})'.format(self.cpu_names)
 
     __repr__ = __str__
+
+
+class MountPoints(object):
+    """
+    Get a snapshot of the currently mounted filesystems and their attributes.
+
+    The list of filesystems mounted at creation type is parsed and their
+    attributes stores. This returns a snapshot, if mount points should change
+    after this object creation, a new instance should be created to get an
+    updated view.
+    """
+
+    _mount_re = re.compile(r'(?P<label>.*) on (?P<root>.*) type '
+                          r'(?P<type>.*) \((?P<attrs>.*)\)')
+
+    def __init__(self, target):
+        self._mount_points = []
+
+        MountPoint = namedtuple('MountPoint', [
+            'label', 'root', 'type', 'attrs'])
+
+        for line in target.execute("mount").splitlines():
+            match = self._mount_re.match(line)
+            if not match:
+                continue
+            mp =  MountPoint(match.group('label'), match.group('root'),
+                             match.group('type'), match.group('attrs').split(','))
+            self._mount_points.append(mp)
+
+    @property
+    def list(self):
+        return self._mount_points
+
+    def __iter__(self):
+        self._next = 0
+        return self
+
+    def __next__(self):
+        if self._next == len(self._mount_points):
+            raise StopIteration
+        result = self._mount_points[self._next]
+        self._next += 1
+        return result;
+
+    @property
+    @memoized
+    def types(self):
+        """
+        List of types of all the mounted filesystems
+        """
+        types = set()
+        for mp in self._mount_points:
+            types.add(mp.type)
+        return types
+
+    @property
+    @memoized
+    def labels(self):
+        """
+        List of labels for all the mounted filesystems
+        """
+        labels = set()
+        for mp in self._mount_points:
+            labels.add(mp.label)
+        return labels
+
+    @property
+    @memoized
+    def roots(self):
+        """
+        List of mount points root for all the mounted filesystems
+        """
+        roots = set()
+        for mp in self._mount_points:
+            roots.add(mp.label)
+        return roots
+
+    @memoized
+    def root_of(self, label):
+        """
+        Get the mount point(s) of a given filesystem label
+
+        :param label: a regular expression to match the fileystem to report
+        :type label: str
+        """
+        label_re = re.compile(label)
+        results = []
+        for mp in self._mount_points:
+            match = label_re.match(mp.label)
+            if not match:
+                continue
+            results.append(mp.root)
+        return results;
+
+    def __str__(self):
+        report = '{:16s} {:32s} {:8s} {:s}\n'.format(
+            'Label', 'Root', 'Type', 'Attrs')
+        for mount in self._mount_points:
+            report += "{:16s} {:32s} {:8s} {:s}\n".format(
+                mount.label, mount.root, mount.type, ', '.join(mount.attrs))
+        return report
 
 
 class KernelVersion(object):
