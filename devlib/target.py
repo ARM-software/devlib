@@ -13,6 +13,9 @@
 # limitations under the License.
 #
 
+import io
+import base64
+import gzip
 import os
 import re
 import time
@@ -684,23 +687,61 @@ class Target(object):
         timeout = duration + 10
         self.execute('sleep {}'.format(duration), timeout=timeout)
 
-    def read_tree_values_flat(self, path, depth=1, check_exit_code=True):
-        command = 'read_tree_values {} {}'.format(quote(path), depth)
+    def read_tree_values_flat(self, path, depth=1, check_exit_code=True,
+                              decode_unicode=True, strip_null_chars=True):
+        command = 'read_tree_tgz_b64 {} {} {}'.format(quote(path), depth,
+                                                  quote(self.working_directory))
         output = self._execute_util(command, as_root=self.is_rooted,
                                     check_exit_code=check_exit_code)
 
-        accumulator = defaultdict(list)
-        for entry in output.strip().split('\n'):
-            if ':' not in entry:
-                continue
-            path, value = entry.strip().split(':', 1)
-            accumulator[path].append(value)
+        result = {}
 
-        result = {k: '\n'.join(v).strip() for k, v in accumulator.items()}
+        # Unpack the archive in memory
+        tar_gz = base64.b64decode(output)
+        tar_gz_bytes = io.BytesIO(tar_gz)
+        tar_buf = gzip.GzipFile(fileobj=tar_gz_bytes).read()
+        tar_bytes = io.BytesIO(tar_buf)
+        with tarfile.open(fileobj=tar_bytes) as tar:
+            for member in tar.getmembers():
+                try:
+                    content_f = tar.extractfile(member)
+                # ignore exotic members like sockets
+                except Exception:
+                    continue
+                # if it is a file and not a folder
+                if content_f:
+                    content = content_f.read()
+                    if decode_unicode:
+                        try:
+                            content = content.decode('utf-8').strip()
+                            if strip_null_chars:
+                                content = content.replace('\x00', '').strip()
+                        except UnicodeDecodeError:
+                            content = ''
+
+                    name = self.path.join(path, member.name)
+                    result[name] = content
+
         return result
 
-    def read_tree_values(self, path, depth=1, dictcls=dict, check_exit_code=True):
-        value_map = self.read_tree_values_flat(path, depth, check_exit_code)
+    def read_tree_values(self, path, depth=1, dictcls=dict,
+                         check_exit_code=True, decode_unicode=True,
+                         strip_null_chars=True):
+        """
+        Reads the content of all files under a given tree
+
+        :path: path to the tree
+        :depth: maximum tree depth to read
+        :dictcls: type of the dict used to store the results
+        :check_exit_code: raise an exception if the shutil command fails
+        :decode_unicode: decode the content of files as utf-8
+        :strip_null_chars: remove '\x00' chars from the content of utf-8
+                           decoded files
+
+        :returns: a tree-like dict with the content of files as leafs
+        """
+        value_map = self.read_tree_values_flat(path, depth, check_exit_code,
+                                               decode_unicode, strip_null_chars)
         return _build_path_tree(value_map, path, self.path.sep, dictcls)
 
     # internal methods
