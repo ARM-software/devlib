@@ -1999,6 +1999,8 @@ class KernelConfig(object):
         for k, v in self.typed_config.items():
             yield (k, self.typed_config._val_to_str(v))
 
+    items = iteritems
+
     def get(self, name, strict=False):
         if strict:
             val = self.typed_config[name]
