@@ -1856,7 +1856,7 @@ class TypedKernelConfig(Mapping):
         elif isinstance(val, KernelConfigTristate):
             return val.value
         elif isinstance(val, basestring):
-            return '"{}"'.format(val)
+            return '"{}"'.format(val.strip('"'))
         else:
             return str(val)
 
