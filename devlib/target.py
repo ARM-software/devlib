@@ -1792,7 +1792,7 @@ class KernelVersion(object):
     __repr__ = __str__
 
 
-class HexInt(int):
+class HexInt(long):
     """
     Subclass of :class:`int` that uses hexadecimal formatting by default.
     """
@@ -1805,7 +1805,7 @@ class HexInt(int):
             return super_new(cls, val, base=base)
 
     def __str__(self):
-        return hex(self)
+        return hex(self).strip('L')
 
 
 class KernelConfigTristate(Enum):
