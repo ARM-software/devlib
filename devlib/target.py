@@ -30,6 +30,7 @@ import xml.dom.minidom
 import copy
 from collections import namedtuple, defaultdict
 from pipes import quote
+from past.builtins import long
 from past.types import basestring
 from numbers import Number
 try:
