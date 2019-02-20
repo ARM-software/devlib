@@ -53,10 +53,10 @@ from devlib.host import LocalConnection
 from devlib.utils.android import AdbConnection
 from devlib.utils.ssh import SshConnection, TelnetConnection, Gem5Connection
 
-from devlib.utils.version import get_commit as __get_commit
+from devlib.utils.version import get_devlib_version, get_commit as __get_commit
 
 
-__version__ = '1.1.dev1'
+__version__ = get_devlib_version()
 
 __commit = __get_commit()
 if __commit:
