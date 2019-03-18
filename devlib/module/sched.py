@@ -423,7 +423,6 @@ class SchedModule(Module):
             int
         )
 
-    @memoized
     def get_capacities(self, default=None):
         """
         :param default: Default capacity value to find if no data is
@@ -434,7 +433,7 @@ class SchedModule(Module):
         :raises RuntimeError: Raised when no capacity information is
         found and 'default' is None
         """
-        cpus = list(range(self.target.number_of_cpus))
+        cpus = self.target.list_online_cpus()
 
         capacities = {}
         sd_info = self.get_sd_info()
