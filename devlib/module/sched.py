@@ -228,7 +228,7 @@ class SchedProcFSData(SchedProcFSNode):
         # Even if we have a CPU entry, it can be empty (e.g. hotplugged out)
         # Make sure some data is there
         for cpu in cpus:
-            if target.file_exists(target.path.join(path, cpu, "domain0", "name")):
+            if target.file_exists(target.path.join(path, cpu, "domain0", "flags")):
                 return True
 
         return False
