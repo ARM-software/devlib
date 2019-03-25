@@ -141,6 +141,7 @@ class DmesgCollector(TraceCollector):
         # help with an exit code of 1
         self.basic_dmesg = 'BusyBox' in self.target.execute('dmesg -h',
                                                         check_exit_code=False)
+        self.facility = facility
         self.reset()
 
     @property
