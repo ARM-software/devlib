@@ -164,7 +164,7 @@ class DmesgCollector(TraceCollector):
     def start(self):
         self.reset()
         # Empty the dmesg ring buffer
-        self.target.execute('dmesg -c')
+        self.target.execute('dmesg -c', as_root=True)
 
     def stop(self):
         levels_list = list(takewhile(
