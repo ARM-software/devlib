@@ -1,4 +1,3 @@
-
 #    Copyright 2018 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -71,7 +70,7 @@ class PerfCollector(TraceCollector):
                  events=None,
                  optionstring=None,
                  labels=None,
-                 perf_mode='stat',
+                 mode='stat',
                  report_optionstring=None,
                  force_install=False):
         super(PerfCollector, self).__init__(target)
@@ -96,10 +95,10 @@ class PerfCollector(TraceCollector):
             raise ValueError('The number of labels must match the number of optstrings provided for perf.')
         if len(self.optionstrings) != len(self.report_optionstrings):
             raise ValueError('The number of report_optionstrings must match the number of optionstrings provided for perf.')
-        if perf_mode == 'stat' or perf_mode == 'record':
-            self.perf_mode = perf_mode
-        elif perf_mode != 'stat' or perf_mode != 'record':
-            raise ValueError('Invalid perf_mode setting, must be stat or record')
+        if mode in ['stat', 'record']:
+            self.mode = mode
+        elif mode not in ['stat', 'record']:
+            raise ValueError('Invalid mode setting, must be stat or record')
 
         self.binary = self.target.get_installed('perf')
         if self.force_install or not self.binary:
@@ -126,7 +125,7 @@ class PerfCollector(TraceCollector):
     def get_trace(self, outdir):
         for label, report_opt in zip(self.labels, self.report_optionstrings):
             #in record mode generate report and copy
-            if self.perf_mode == 'record':
+            if self.mode == 'record':
                 # .rpt
                 command = self._build_perf_report_command(report_opt, label)
                 self.target.execute(command, as_root=True)
@@ -163,7 +162,7 @@ class PerfCollector(TraceCollector):
     def _build_perf_command(self, options, events, label):
         event_string = ' '.join(['-e {}'.format(e) for e in events])
         command = PERF_COMMAND_TEMPLATE.format(self.binary,
-                                               self.perf_mode,
+                                               self.mode,
                                                options or '',
                                                event_string,
                                                self._get_target_outfile(label))
