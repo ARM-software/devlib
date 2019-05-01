@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2019 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,131 +11,130 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
+# pylint: disable=missing-docstring
 
+import collections
 import os
-import re
-from past.builtins import basestring, zip
+import sys
 
+from devlib.utils.cli import Command
 from devlib.host import PACKAGE_BIN_DIRECTORY
 from devlib.trace import TraceCollector
-from devlib.utils.misc import ensure_file_directory_exists as _f
+
+if sys.version_info >= (3, 0):
+    from shlex import quote
+else:
+    from pipes import quote
 
 
-PERF_COMMAND_TEMPLATE = '{} stat {} {} sleep 1000 > {} 2>&1 '
+class PerfCommandDict(collections.OrderedDict):
 
-PERF_COUNT_REGEX = re.compile(r'^(CPU\d+)?\s*(\d+)\s*(.*?)\s*(\[\s*\d+\.\d+%\s*\])?\s*$')
+    def __init__(self, yaml_dict):
+        super().__init__()
+        self._stat_command_labels = set()
+        if isinstance(yaml_dict, self.__class__):
+            for key, val in yaml_dict.items():
+                self[key] = val
+            return
+        yaml_dict_copy = yaml_dict.copy()
+        for label, parameters in yaml_dict_copy.items():
+            self[label] = Command(kwflags_join=',',
+                                  kwflags_sep='=',
+                                  end_of_options='--',
+                                  **parameters)
+            if 'stat'in parameters['command']:
+                self._stat_command_labels.add(label)
 
-DEFAULT_EVENTS = [
-    'migrations',
-    'cs',
-]
+    def stat_commands(self):
+        return {label: self[label] for label in self._stat_command_labels}
+
+    def as_strings(self):
+        return {label: str(cmd) for label, cmd in self.items()}
 
 
 class PerfCollector(TraceCollector):
+    """Perf is a Linux profiling tool based on performance counters.
+
+    Performance counters are typically CPU hardware registers (found in the
+    Performance Monitoring Unit) that count hardware events such as
+    instructions executed, cache-misses suffered, or branches mispredicted.
+    Because each ``event`` corresponds to a hardware counter, the maximum
+    number of events that can be tracked is imposed by the available hardware.
+
+    By extension, performance counters, in the context of ``perf``, also refer
+    to so-called "software counters" representing events that can be tracked by
+    the OS kernel (e.g. context switches). As these are software events, the
+    counters are kept in RAM and the hardware virtually imposes no limit on the
+    number that can be used.
+
+    This collector calls ``perf`` ``commands`` to capture a run of a workload.
+    The ``pre_commands`` and ``post_commands`` are provided to suit those
+    ``perf`` commands that don't actually capture data (``list``, ``config``,
+    ``report``, ...).
+
+    ``pre_commands``, ``commands`` and ``post_commands`` are instances of
+    :class:`PerfCommandDict`.
     """
-    Perf is a Linux profiling with performance counters.
-
-    Performance counters are CPU hardware registers that count hardware events
-    such as instructions executed, cache-misses suffered, or branches
-    mispredicted. They form a basis for profiling applications to trace dynamic
-    control flow and identify hotspots.
-
-    pref accepts options and events. If no option is given the default '-a' is
-    used. For events, the default events are migrations and cs. They both can
-    be specified in the config file.
-
-    Events must be provided as a list that contains them and they will look like
-    this ::
-
-        perf_events = ['migrations', 'cs']
-
-    Events can be obtained by typing the following in the command line on the
-    device ::
-
-        perf list
-
-    Whereas options, they can be provided as a single string as following ::
-
-        perf_options = '-a -i'
-
-    Options can be obtained by running the following in the command line ::
-
-        man perf-stat
-    """
-
-    def __init__(self, target,
-                 events=None,
-                 optionstring=None,
-                 labels=None,
-                 force_install=False):
+    def __init__(self, target, force_install=False, pre_commands=None,
+                 commands=None, post_commands=None):
+        # pylint: disable=too-many-arguments
         super(PerfCollector, self).__init__(target)
-        self.events = events if events else DEFAULT_EVENTS
-        self.force_install = force_install
-        self.labels = labels
-
-        # Validate parameters
-        if isinstance(optionstring, list):
-            self.optionstrings = optionstring
-        else:
-            self.optionstrings = [optionstring]
-        if self.events and isinstance(self.events, basestring):
-            self.events = [self.events]
-        if not self.labels:
-            self.labels = ['perf_{}'.format(i) for i in range(len(self.optionstrings))]
-        if len(self.labels) != len(self.optionstrings):
-            raise ValueError('The number of labels must match the number of optstrings provided for perf.')
+        self.pre_commands = pre_commands or PerfCommandDict({})
+        self.commands = commands or PerfCommandDict({})
+        self.post_commands = post_commands or PerfCommandDict({})
 
         self.binary = self.target.get_installed('perf')
-        if self.force_install or not self.binary:
-            self.binary = self._deploy_perf()
+        if force_install or not self.binary:
+            host_binary = os.path.join(PACKAGE_BIN_DIRECTORY,
+                                       self.target.abi, 'perf')
+            self.binary = self.target.install(host_binary)
 
-        self.commands = self._build_commands()
+        self.kill_sleep = False
 
     def reset(self):
+        super(PerfCollector, self).reset()
+        self.target.remove(self.working_directory())
         self.target.killall('perf', as_root=self.target.is_rooted)
-        for label in self.labels:
-            filepath = self._get_target_outfile(label)
-            self.target.remove(filepath)
 
     def start(self):
-        for command in self.commands:
-            self.target.kick_off(command)
+        super(PerfCollector, self).start()
+        for label, command in self.pre_commands.items():
+            self.execute(str(command), label)
+        for label, command in self.commands.items():
+            self.kick_off(str(command), label)
+            if 'sleep' in str(command):
+                self.kill_sleep = True
 
     def stop(self):
+        super(PerfCollector, self).stop()
         self.target.killall('perf', signal='SIGINT',
                             as_root=self.target.is_rooted)
-        # perf doesn't transmit the signal to its sleep call so handled here:
-        self.target.killall('sleep', as_root=self.target.is_rooted)
-        # NB: we hope that no other "important" sleep is on-going
+        if self.kill_sleep:
+            self.target.killall('sleep', as_root=self.target.is_rooted)
+        for label, command in self.post_commands.items():
+            self.execute(str(command), label)
 
-    # pylint: disable=arguments-differ
-    def get_trace(self, outdir):
-        for label in self.labels:
-            target_file = self._get_target_outfile(label)
-            host_relpath = os.path.basename(target_file)
-            host_file = _f(os.path.join(outdir, host_relpath))
-            self.target.pull(target_file, host_file)
+    def kick_off(self, command, label=None):
+        directory = quote(self.working_directory(label or 'default'))
+        return self.target.kick_off('mkdir -p {0} && cd {0} && {1} {2}'
+                                    .format(directory, self.binary, command),
+                                    as_root=self.target.is_rooted)
 
-    def _deploy_perf(self):
-        host_executable = os.path.join(PACKAGE_BIN_DIRECTORY,
-                                       self.target.abi, 'perf')
-        return self.target.install(host_executable)
+    def execute(self, command, label=None):
+        directory = quote(self.working_directory(label or 'default'))
+        return self.target.execute('mkdir -p {0} && cd {0} && {1} {2}'
+                                   .format(directory, self.binary, command),
+                                   as_root=self.target.is_rooted)
 
-    def _build_commands(self):
-        commands = []
-        for opts, label in zip(self.optionstrings, self.labels):
-            commands.append(self._build_perf_command(opts, self.events, label))
-        return commands
+    def working_directory(self, label=None):
+        wdir = self.target.path.join(self.target.working_directory,
+                                     'instrument', 'perf')
+        return wdir if label is None else self.target.path.join(wdir, label)
 
-    def _get_target_outfile(self, label):
-        return self.target.get_workpath('{}.out'.format(label))
+    def get_traces(self, host_outdir):
+        self.target.pull(self.working_directory(), host_outdir,
+                         as_root=self.target.is_rooted)
 
-    def _build_perf_command(self, options, events, label):
-        event_string = ' '.join(['-e {}'.format(e) for e in events])
-        command = PERF_COMMAND_TEMPLATE.format(self.binary,
-                                               options or '',
-                                               event_string,
-                                               self._get_target_outfile(label))
-        return command
+    def get_trace(self, outfile):
+        raise NotImplementedError
