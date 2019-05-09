@@ -29,6 +29,7 @@ import threading
 import xml.dom.minidom
 import copy
 from collections import namedtuple, defaultdict
+from contextlib import contextmanager
 from pipes import quote
 from past.builtins import long
 from past.types import basestring
@@ -51,6 +52,7 @@ from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor
 from devlib.utils.misc import memoized, isiterable, convert_new_lines
 from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
+from devlib.utils.misc import batch_contextmanager
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string, bytes_regex
 
 
@@ -69,7 +71,6 @@ GOOGLE_DNS_SERVER_ADDRESS = '8.8.8.8'
 
 
 installed_package_info = namedtuple('installed_package_info', 'apk_path package')
-
 
 class Target(object):
 
@@ -480,6 +481,18 @@ class Target(object):
 
     def read_bool(self, path):
         return self.read_value(path, kind=boolean)
+
+    @contextmanager
+    def revertable_write_value(self, path, value, verify=True):
+        orig_value = self.read_value(path)
+        try:
+            self.write_value(path, value, verify)
+            yield
+        finally:
+            self.write_value(path, orig_value, verify)
+
+    def batch_revertable_write_value(self, kwargs_list):
+        return batch_contextmanager(self.revertable_write_value, kwargs_list)
 
     def write_value(self, path, value, verify=True):
         value = str(value)
