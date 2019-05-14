@@ -431,7 +431,7 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
     if device is not None:
         parts += ['-s', device]
     parts += ['shell',
-              command if not as_root else 'echo {} | su'.format(quote(command))]
+              command if not as_root else 'su -c {}'.format(quote(command))]
 
     logger.debug(' '.join(quote(part) for part in parts))
     # On older combinations of ADB/Android versions, the adb host command always
