@@ -155,7 +155,7 @@ class Target(object):
     def number_of_cpus(self):
         num_cpus = 0
         corere = re.compile(r'^\s*cpu\d+\s*$')
-        output = self.execute('ls /sys/devices/system/cpu')
+        output = self.execute('ls /sys/devices/system/cpu', as_root=self.is_rooted)
         for entry in output.split():
             if corere.match(entry):
                 num_cpus += 1
