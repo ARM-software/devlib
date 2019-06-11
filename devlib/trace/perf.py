@@ -46,12 +46,6 @@ class PerfCommandDict(collections.OrderedDict):
             if 'stat'in parameters['command']:
                 self._stat_command_labels.add(label)
 
-    def stat_commands(self):
-        return {label: self[label] for label in self._stat_command_labels}
-
-    def as_strings(self):
-        return {label: str(cmd) for label, cmd in self.items()}
-
 
 class PerfCollector(TraceCollector):
     """Perf is a Linux profiling tool based on performance counters.
