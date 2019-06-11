@@ -17,7 +17,7 @@ import collections
 import itertools
 import shlex
 
-class Command:
+class Command(dict):
     """Provides an abstraction for manipulating CLI commands
     """
     # pylint: disable=too-many-instance-attributes
@@ -74,6 +74,9 @@ class Command:
         if self.stderr:
             words.append('2>{}'.format(filepipe(self.stderr)))
         return ' '.join(words)
+
+    def __getitem__(self, key):
+        return self.__dict__[key]
 
     @classmethod
     def _flagged(cls, flag):
