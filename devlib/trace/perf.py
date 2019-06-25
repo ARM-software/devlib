@@ -109,17 +109,21 @@ class PerfCollector(TraceCollector):
         for label, command in self.post_commands.items():
             self.execute(str(command), label)
 
+    def _target_runnable_command(self, command, label=None):
+        cmd = '{} {}'.format(self.binary, command)
+        if label is None:
+            return cmd
+        directory = quote(self.working_directory(label))
+        cwd = 'mkdir -p {0} && cd {0}'.format(directory)
+        return '{cwd} && {cmd}'.format(cwd=cwd, cmd=cmd)
+
     def kick_off(self, command, label=None):
-        directory = quote(self.working_directory(label or 'default'))
-        return self.target.kick_off('mkdir -p {0} && cd {0} && {1} {2}'
-                                    .format(directory, self.binary, command),
-                                    as_root=self.target.is_rooted)
+        cmd = self._target_runnable_command(command, label)
+        return self.target.kick_off(cmd, as_root=self.target.is_rooted)
 
     def execute(self, command, label=None):
-        directory = quote(self.working_directory(label or 'default'))
-        return self.target.execute('mkdir -p {0} && cd {0} && {1} {2}'
-                                   .format(directory, self.binary, command),
-                                   as_root=self.target.is_rooted)
+        cmd = self._target_runnable_command(command, label)
+        return self.target.execute(cmd, as_root=self.target.is_rooted)
 
     def working_directory(self, label=None):
         wdir = self.target.path.join(self.target.working_directory,
