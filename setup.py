@@ -85,8 +85,10 @@ params = dict(
         'wrapt',  # Basic for construction of decorator functions
         'future', # Python 2-3 compatibility
         'enum34;python_version<"3.4"', # Enums for Python < 3.4
-        'pandas',
-        'numpy',
+        'numpy<=1.16.4; python_version<"3"',
+        'numpy; python_version>="3"',
+        'pandas<=0.24.2; python_version<"3"',
+        'pandas; python_version>"3"',
     ],
     extras_require={
         'daq': ['daqpower'],
