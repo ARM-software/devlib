@@ -415,7 +415,10 @@ class SchedModule(Module):
             sd = SchedProcFSData(self.target, cpu)
 
         cap_states = sd.domains[0].groups[0].energy.cap_states
-        return int(cap_states.split('\t')[-2])
+        cap_states_list = cap_states.split('\t')
+        num_cap_states = sd.domains[0].groups[0].energy.nr_cap_states
+        max_cap_index = -1 * int(len(cap_states_list) / num_cap_states)
+        return int(cap_states_list[max_cap_index])
 
     @memoized
     def get_dmips_capacity(self, cpu):
