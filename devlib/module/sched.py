@@ -259,7 +259,21 @@ class SchedModule(Module):
         logger = logging.getLogger(SchedModule.name)
         SchedDomainFlag.check_version(target, logger)
 
-        return SchedProcFSData.available(target)
+        # It makes sense to load this module if at least one of those
+        # functionalities is enabled
+        schedproc = SchedProcFSData.available(target)
+        debug = SchedModule.target_has_debug(target)
+        dmips = any([target.file_exists(SchedModule.cpu_dmips_capacity_path(target, cpu))
+                     for cpu in target.list_online_cpus()])
+
+        logger.info("Scheduler sched_domain procfs entries %s",
+                    "found" if schedproc else "not found")
+        logger.info("Detected kernel compiled with SCHED_DEBUG=%s",
+                    "y" if debug else "n")
+        logger.info("CPU capacity sysfs entries %s",
+                    "found" if dmips else "not found")
+
+        return schedproc or debug or dmips
 
     def get_kernel_attributes(self, matching=None, check_exit_code=True):
         """
