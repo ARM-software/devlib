@@ -313,12 +313,16 @@ class SchedModule(Module):
         path = '/proc/sys/kernel/sched_' + attr
         self.target.write_value(path, value, verify)
 
+    @classmethod
+    def target_has_debug(cls, target):
+        if target.config.get('SCHED_DEBUG') != 'y':
+            return False
+        return target.file_exists('/sys/kernel/debug/sched_features')
+
     @property
     @memoized
     def has_debug(self):
-        if self.target.config.get('SCHED_DEBUG') != 'y':
-            return False;
-        return self.target.file_exists('/sys/kernel/debug/sched_features')
+        return self.target_has_debug(self.target)
 
     def get_features(self):
         """
