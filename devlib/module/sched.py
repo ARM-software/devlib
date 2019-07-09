@@ -393,7 +393,7 @@ class SchedModule(Module):
         :returns: Whether energy model data is available for 'cpu'
         """
         if not sd:
-            sd = SchedProcFSData(self.target, cpu)
+            sd = self.get_cpu_sd_info(cpu)
 
         return sd.procfs["domain0"].get("group0", {}).get("energy", {}).get("cap_states") != None
 
@@ -412,7 +412,7 @@ class SchedModule(Module):
         :returns: The maximum capacity value exposed by the EAS energy model
         """
         if not sd:
-            sd = SchedProcFSData(self.target, cpu)
+            sd = self.get_cpu_sd_info(cpu)
 
         cap_states = sd.domains[0].groups[0].energy.cap_states
         cap_states_list = cap_states.split('\t')
