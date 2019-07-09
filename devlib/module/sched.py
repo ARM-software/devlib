@@ -401,13 +401,22 @@ class SchedModule(Module):
 
         return sd.procfs["domain0"].get("group0", {}).get("energy", {}).get("cap_states") != None
 
+    @classmethod
+    def cpu_dmips_capacity_path(cls, target, cpu):
+        """
+        :returns: The target sysfs path where the dmips capacity data should be
+        """
+        return target.path.join(
+            cls.cpu_sysfs_root,
+            'cpu{}/cpu_capacity'.format(cpu))
+
     @memoized
     def has_dmips_capacity(self, cpu):
         """
         :returns: Whether dmips capacity data is available for 'cpu'
         """
         return self.target.file_exists(
-            self.target.path.join(self.cpu_sysfs_root, 'cpu{}/cpu_capacity'.format(cpu))
+            self.cpu_dmips_capacity_path(self.target, cpu)
         )
 
     @memoized
@@ -430,11 +439,7 @@ class SchedModule(Module):
         :returns: The capacity value generated from the capacity-dmips-mhz DT entry
         """
         return self.target.read_value(
-            self.target.path.join(
-                self.cpu_sysfs_root,
-                'cpu{}/cpu_capacity'.format(cpu)
-            ),
-            int
+            self.cpu_dmips_capacity_path(self.target, cpu), int
         )
 
     def get_capacities(self, default=None):
