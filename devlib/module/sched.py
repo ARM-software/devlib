@@ -241,7 +241,7 @@ class SchedProcFSData(SchedProcFSNode):
         return False
 
     def __init__(self, target, path=None):
-        if not path:
+        if path is None:
             path = self.sched_domain_root
 
         procfs = target.read_tree_values(path, depth=self._read_depth)
