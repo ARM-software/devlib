@@ -2020,6 +2020,9 @@ class KernelConfig(object):
         # Expose the original text for backward compatibility
         self.text = text
 
+    def __bool__(self):
+        return bool(self.typed_config)
+
     not_set_regex = TypedKernelConfig.not_set_regex
 
     def iteritems(self):
