@@ -2009,6 +2009,9 @@ class KernelConfig(object):
 
     This class does not provide a Mapping API and only return string values.
     """
+    @staticmethod
+    def get_config_name(name):
+        return TypedKernelConfig.get_config_name(name)
 
     def __init__(self, text):
         # Expose typed_config as a non-private attribute, so that user code
@@ -2017,7 +2020,6 @@ class KernelConfig(object):
         # Expose the original text for backward compatibility
         self.text = text
 
-    get_config_name = TypedKernelConfig.get_config_name
     not_set_regex = TypedKernelConfig.not_set_regex
 
     def iteritems(self):
