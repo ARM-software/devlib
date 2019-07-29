@@ -239,6 +239,7 @@ class AdbConnection(object):
     active_connections = defaultdict(int)
     default_timeout = 10
     ls_command = 'ls'
+    su_cmd = 'su -c {}'
 
     @property
     def name(self):
@@ -264,6 +265,7 @@ class AdbConnection(object):
             self.ls_command = 'ls'
         logger.debug("ls command is set to {}".format(self.ls_command))
 
+
     # pylint: disable=unused-argument
     def __init__(self, device=None, timeout=None, platform=None, adb_server=None):
         self.timeout = timeout if timeout is not None else self.default_timeout
@@ -274,6 +276,7 @@ class AdbConnection(object):
         adb_connect(self.device)
         AdbConnection.active_connections[self.device] += 1
         self._setup_ls()
+        self._setup_su()
 
     def push(self, source, dest, timeout=None):
         if timeout is None:
@@ -303,7 +306,7 @@ class AdbConnection(object):
                 as_root=False, strip_colors=True, will_succeed=False):
         try:
             return adb_shell(self.device, command, timeout, check_exit_code,
-                             as_root, adb_server=self.adb_server)
+                             as_root, adb_server=self.adb_server, su_cmd=self.su_cmd)
         except TargetStableError as e:
             if will_succeed:
                 raise TargetTransientError(e)
@@ -324,6 +327,18 @@ class AdbConnection(object):
         # other, so there is no need to explicitly cancel a running command
         # before the next one can be issued.
         pass
+
+
+    def _setup_su(self):
+        try:
+            # Try the new style of invoking `su`
+            self.execute('ls', timeout=self.timeout, as_root=True,
+                         check_exit_code=True)
+        # If failure assume either old style or unrooted. Here we will assume
+        # old style and root status will be verified later.
+        except (TargetStableError, TargetTransientError, TimeoutError):
+            self.su_cmd = 'echo {} | su'
+        logger.debug("su command is set to {}".format(quote(self.su_cmd)))
 
 
 def fastboot_command(command, timeout=None, device=None):
@@ -423,7 +438,7 @@ def _ping(device):
 
 # pylint: disable=too-many-locals
 def adb_shell(device, command, timeout=None, check_exit_code=False,
-              as_root=False, adb_server=None):  # NOQA
+              as_root=False, adb_server=None, su_cmd='su -c {}'):  # NOQA
     _check_env()
     parts = ['adb']
     if adb_server is not None:
@@ -431,7 +446,7 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
     if device is not None:
         parts += ['-s', device]
     parts += ['shell',
-              command if not as_root else 'su -c {}'.format(quote(command))]
+              command if not as_root else su_cmd.format(quote(command))]
 
     logger.debug(' '.join(quote(part) for part in parts))
     # On older combinations of ADB/Android versions, the adb host command always
