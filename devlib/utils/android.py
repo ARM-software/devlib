@@ -246,7 +246,7 @@ class AdbConnection(object):
         return self.device
 
     # pylint: disable=unused-argument
-    def __init__(self, device=None, timeout=None, platform=None, adb_server=None):
+    def __init__(self, device=None, timeout=None, platform=None, adb_server=None, username=None):
         self.timeout = timeout if timeout is not None else self.default_timeout
         if device is None:
             device = adb_get_device(timeout=timeout, adb_server=adb_server)

@@ -1190,6 +1190,10 @@ class AndroidTarget(Target):
             # indefinitely when making calls to the device. To avoid this,
             # always disconnect first.
             adb_disconnect(device)
+
+        if self.connection_settings.get('username') == 'root':
+            self.adb_root(device=self.connection_settings.get('device', ''))
+
         super(AndroidTarget, self).connect(timeout=timeout, check_boot_completed=check_boot_completed)
 
     def kick_off(self, command, as_root=None):
@@ -1483,14 +1487,16 @@ class AndroidTarget(Target):
     def adb_reboot_bootloader(self, timeout=30):
         adb_command(self.adb_name, 'reboot-bootloader', timeout)
 
-    def adb_root(self, enable=True, force=False):
+    def adb_root(self, enable=True, force=False, device=None):
+        adb_name = device if device is not None else self.adb_name
+
         if enable:
             if self._connected_as_root and not force:
                 return
-            adb_command(self.adb_name, 'root', timeout=30)
+            adb_command(adb_name, 'root', timeout=30)
             self._connected_as_root = True
             return
-        adb_command(self.adb_name, 'unroot', timeout=30)
+        adb_command(adb_name, 'unroot', timeout=30)
         self._connected_as_root = False
 
     def is_screen_on(self):
