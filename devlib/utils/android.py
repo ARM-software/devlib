@@ -245,27 +245,6 @@ class AdbConnection(object):
     def name(self):
         return self.device
 
-    # Again, we need to handle boards where the default output format from ls is
-    # single column *and* boards where the default output is multi-column.
-    # We need to do this purely because the '-1' option causes errors on older
-    # versions of the ls tool in Android pre-v7.
-    def _setup_ls(self):
-        command = "shell '(ls -1); echo \"\n$?\"'"
-        try:
-            output = adb_command(self.device, command, timeout=self.timeout, adb_server=self.adb_server)
-        except subprocess.CalledProcessError as e:
-            raise HostError(
-                'Failed to set up ls command on Android device. Output:\n'
-                + e.output)
-        lines = output.splitlines()
-        retval = lines[-1].strip()
-        if int(retval) == 0:
-            self.ls_command = 'ls -1'
-        else:
-            self.ls_command = 'ls'
-        logger.debug("ls command is set to {}".format(self.ls_command))
-
-
     # pylint: disable=unused-argument
     def __init__(self, device=None, timeout=None, platform=None, adb_server=None):
         self.timeout = timeout if timeout is not None else self.default_timeout
@@ -328,6 +307,25 @@ class AdbConnection(object):
         # before the next one can be issued.
         pass
 
+    # Again, we need to handle boards where the default output format from ls is
+    # single column *and* boards where the default output is multi-column.
+    # We need to do this purely because the '-1' option causes errors on older
+    # versions of the ls tool in Android pre-v7.
+    def _setup_ls(self):
+        command = "shell '(ls -1); echo \"\n$?\"'"
+        try:
+            output = adb_command(self.device, command, timeout=self.timeout, adb_server=self.adb_server)
+        except subprocess.CalledProcessError as e:
+            raise HostError(
+                'Failed to set up ls command on Android device. Output:\n'
+                + e.output)
+        lines = output.splitlines()
+        retval = lines[-1].strip()
+        if int(retval) == 0:
+            self.ls_command = 'ls -1'
+        else:
+            self.ls_command = 'ls'
+        logger.debug("ls command is set to {}".format(self.ls_command))
 
     def _setup_su(self):
         try:
