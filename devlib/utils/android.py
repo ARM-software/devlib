@@ -438,6 +438,14 @@ def _ping(device):
 def adb_shell(device, command, timeout=None, check_exit_code=False,
               as_root=False, adb_server=None, su_cmd='su -c {}'):  # NOQA
     _check_env()
+
+    # On older combinations of ADB/Android versions, the adb host command always
+    # exits with 0 if it was able to run the command on the target, even if the
+    # command failed (https://code.google.com/p/android/issues/detail?id=3254).
+    # Homogenise this behaviour by running the command then echoing the exit
+    # code of the executed command itself.
+    command += r' ; echo "\n$?"'
+
     parts = ['adb']
     if adb_server is not None:
         parts += ['-H', adb_server]
@@ -447,12 +455,6 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
               command if not as_root else su_cmd.format(quote(command))]
 
     logger.debug(' '.join(quote(part) for part in parts))
-    # On older combinations of ADB/Android versions, the adb host command always
-    # exits with 0 if it was able to run the command on the target, even if the
-    # command failed (https://code.google.com/p/android/issues/detail?id=3254).
-    # Homogenise this behaviour by running the command then echoing the exit
-    # code.
-    parts[-1] += ' ; echo "\n$?"'
     try:
         raw_output, _ = check_output(parts, timeout, shell=False, combined_output=True)
     except subprocess.CalledProcessError as e:
