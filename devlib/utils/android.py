@@ -444,7 +444,7 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
     # command failed (https://code.google.com/p/android/issues/detail?id=3254).
     # Homogenise this behaviour by running the command then echoing the exit
     # code of the executed command itself.
-    command += r' ; echo "\n$?"'
+    command = r'({}); echo "\n$?"'.format(command)
 
     parts = ['adb']
     if adb_server is not None:
