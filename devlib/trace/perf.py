@@ -23,7 +23,8 @@ from devlib.trace import TraceCollector
 from devlib.utils.misc import ensure_file_directory_exists as _f
 
 
-PERF_COMMAND_TEMPLATE = '{} stat {} {} sleep 1000 > {} 2>&1 '
+PERF_COMMAND_TEMPLATE = '{} {} {} {} sleep 1000 > {} 2>&1 '
+PERF_REPORT_COMMAND_TEMPLATE = '{} report {} -i {} > {} 2>&1 '
 
 PERF_COUNT_REGEX = re.compile(r'^(CPU\d+)?\s*(\d+)\s*(.*?)\s*(\[\s*\d+\.\d+%\s*\])?\s*$')
 
@@ -69,6 +70,8 @@ class PerfCollector(TraceCollector):
                  events=None,
                  optionstring=None,
                  labels=None,
+                 mode='stat',
+                 report_optionstring=None,
                  force_install=False):
         super(PerfCollector, self).__init__(target)
         self.events = events if events else DEFAULT_EVENTS
@@ -82,10 +85,20 @@ class PerfCollector(TraceCollector):
             self.optionstrings = [optionstring]
         if self.events and isinstance(self.events, basestring):
             self.events = [self.events]
+        if isinstance(report_optionstring, list):
+            self.report_optionstrings = report_optionstring
+        else:
+            self.report_optionstrings = [report_optionstring]
         if not self.labels:
             self.labels = ['perf_{}'.format(i) for i in range(len(self.optionstrings))]
         if len(self.labels) != len(self.optionstrings):
             raise ValueError('The number of labels must match the number of optstrings provided for perf.')
+        if len(self.optionstrings) != len(self.report_optionstrings):
+            raise ValueError('The number of report_optionstrings must match the number of optionstrings provided for perf.')
+        if mode in ['stat', 'record']:
+            self.mode = mode
+        elif mode not in ['stat', 'record']:
+            raise ValueError('Invalid mode setting, must be stat or record')
 
         self.binary = self.target.get_installed('perf')
         if self.force_install or not self.binary:
@@ -97,6 +110,8 @@ class PerfCollector(TraceCollector):
         self.target.killall('perf', as_root=self.target.is_rooted)
         for label in self.labels:
             filepath = self._get_target_outfile(label)
+            self.target.remove(filepath)
+            filepath = self._get_target_reportfile(label)
             self.target.remove(filepath)
 
     def start(self):
@@ -112,7 +127,23 @@ class PerfCollector(TraceCollector):
 
     # pylint: disable=arguments-differ
     def get_trace(self, outdir):
-        for label in self.labels:
+        for label, report_opt in zip(self.labels, self.report_optionstrings):
+            #in record mode generate report and copy
+            if self.mode == 'record':
+                # .rpt
+                command = self._build_perf_report_command(report_opt, label)
+                self.target.execute(command, as_root=True)
+                target_file = self._get_target_reportfile(label)
+                host_relpath = os.path.basename(target_file)
+                host_file = _f(os.path.join(outdir, host_relpath))
+                self.target.pull(target_file, host_file)
+                # .trace
+                target_file = self._get_target_tracefile(label)
+                host_relpath = os.path.basename(target_file)
+                host_file = _f(os.path.join(outdir, host_relpath))
+                target_file = self._get_target_perfdatafile()
+                self.target.pull(target_file, host_file)
+            # .out
             target_file = self._get_target_outfile(label)
             host_relpath = os.path.basename(target_file)
             host_file = _f(os.path.join(outdir, host_relpath))
@@ -135,7 +166,25 @@ class PerfCollector(TraceCollector):
     def _build_perf_command(self, options, events, label):
         event_string = ' '.join(['-e {}'.format(e) for e in events])
         command = PERF_COMMAND_TEMPLATE.format(self.binary,
+                                               self.mode,
                                                options or '',
                                                event_string,
                                                self._get_target_outfile(label))
+        return command
+
+    def _get_target_perfdatafile(self):
+        return self.target.get_workpath('perf.data')
+
+    def _get_target_reportfile(self, label):
+        return self.target.get_workpath('{}.rpt'.format(label))
+
+    def _get_target_tracefile(self, label):
+        return self.target.get_workpath('{}.trace'.format(label))
+
+    def _build_perf_report_command(self, reportoptions, label):
+        reportoptions_string = reportoptions
+        command = PERF_REPORT_COMMAND_TEMPLATE.format(self.binary,
+                                                      reportoptions_string,
+                                                      self._get_target_perfdatafile(),
+                                                      self._get_target_reportfile(label))
         return command
