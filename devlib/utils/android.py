@@ -260,12 +260,16 @@ class AdbConnection(object):
 
 
     # pylint: disable=unused-argument
-    def __init__(self, device=None, timeout=None, platform=None, adb_server=None):
+    def __init__(self, device=None, timeout=None, platform=None, adb_server=None,
+                 adb_as_root=False):
         self.timeout = timeout if timeout is not None else self.default_timeout
         if device is None:
             device = adb_get_device(timeout=timeout, adb_server=adb_server)
         self.device = device
         self.adb_server = adb_server
+        self.adb_as_root = adb_as_root
+        if self.adb_as_root:
+            self.adb_root(enable=True)
         adb_connect(self.device)
         AdbConnection.active_connections[self.device] += 1
         self._setup_ls()
@@ -312,6 +316,8 @@ class AdbConnection(object):
     def close(self):
         AdbConnection.active_connections[self.device] -= 1
         if AdbConnection.active_connections[self.device] <= 0:
+            if self.adb_as_root:
+                adb_root(self.device, enable=False)
             adb_disconnect(self.device)
             del AdbConnection.active_connections[self.device]
 
