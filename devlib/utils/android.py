@@ -237,6 +237,8 @@ class AdbConnection(object):
     # maintains the count of parallel active connections to a device, so that
     # adb disconnect is not invoked untill all connections are closed
     active_connections = defaultdict(int)
+    # Track connected as root status per device
+    _connected_as_root = defaultdict(lambda: None)
     default_timeout = 10
     ls_command = 'ls'
     su_cmd = 'su -c {}'
@@ -244,6 +246,18 @@ class AdbConnection(object):
     @property
     def name(self):
         return self.device
+
+    @property
+    def connected_as_root(self):
+        if self._connected_as_root[self.device] is None:
+                result = self.execute('id')
+                self._connected_as_root[self.device] = 'uid=0(' in result
+        return self._connected_as_root[self.device]
+
+    @connected_as_root.setter
+    def connected_as_root(self, state):
+        self._connected_as_root[self.device] = state
+
 
     # pylint: disable=unused-argument
     def __init__(self, device=None, timeout=None, platform=None, adb_server=None):
@@ -306,6 +320,13 @@ class AdbConnection(object):
         # other, so there is no need to explicitly cancel a running command
         # before the next one can be issued.
         pass
+
+    def adb_root(self, enable=True):
+        cmd = 'root' if enable else 'unroot'
+        output = adb_command(self.device, cmd, timeout=30)
+        if 'cannot run as root in production builds' in output:
+            raise TargetStableError(output)
+        AdbConnection._connected_as_root[self.device] = enable
 
     # Again, we need to handle boards where the default output format from ls is
     # single column *and* boards where the default output is multi-column.
