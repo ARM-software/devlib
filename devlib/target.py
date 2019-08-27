@@ -107,10 +107,7 @@ class Target(object):
 
     @property
     def connected_as_root(self):
-        if self._connected_as_root is None:
-            result = self.execute('id')
-            self._connected_as_root = 'uid=0(' in result
-        return self._connected_as_root
+        return self.conn and self.conn.connected_as_root
 
     @property
     def is_rooted(self):
@@ -213,7 +210,6 @@ class Target(object):
                  conn_cls=None,
                  is_container=False
                  ):
-        self._connected_as_root = None
         self._is_rooted = None
         self.connection_settings = connection_settings or {}
         # Set self.platform: either it's given directly (by platform argument)
@@ -323,7 +319,7 @@ class Target(object):
             timeout = max(timeout - reset_delay, 10)
         if self.has('boot'):
             self.boot()  # pylint: disable=no-member
-        self._connected_as_root = None
+        self.conn.connected_as_root = None
         if connect:
             self.connect(timeout=timeout)
 
@@ -497,7 +493,7 @@ class Target(object):
         except (DevlibTransientError, subprocess.CalledProcessError):
             # on some targets "reboot" doesn't return gracefully
             pass
-        self._connected_as_root = None
+        self.conn.connected_as_root = None
 
     def check_responsive(self, explode=True):
         try:
@@ -1169,7 +1165,7 @@ class AndroidTarget(Target):
         except (DevlibTransientError, subprocess.CalledProcessError):
             # on some targets "reboot" doesn't return gracefully
             pass
-        self._connected_as_root = None
+        self.conn.connected_as_root = None
 
     def wait_boot_complete(self, timeout=10):
         start = time.time()
