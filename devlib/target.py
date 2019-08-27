@@ -113,15 +113,15 @@ class Target(object):
         return self._connected_as_root
 
     @property
-    @memoized
     def is_rooted(self):
-        if self.connected_as_root:
-            return True
-        try:
-            self.execute('ls /', timeout=5, as_root=True)
-            return True
-        except (TargetStableError, TimeoutError):
-            return False
+        if self._is_rooted is None:
+            try:
+                self.execute('ls /', timeout=5, as_root=True)
+                self._is_rooted = True
+            except (TargetStableError, TimeoutError):
+                self._is_rooted = False
+
+        return self._is_rooted or self.connected_as_root
 
     @property
     @memoized
@@ -214,6 +214,7 @@ class Target(object):
                  is_container=False
                  ):
         self._connected_as_root = None
+        self._is_rooted = None
         self.connection_settings = connection_settings or {}
         # Set self.platform: either it's given directly (by platform argument)
         # or it's given in the connection_settings argument
