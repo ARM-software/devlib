@@ -1481,14 +1481,11 @@ class AndroidTarget(Target):
         adb_command(self.adb_name, 'reboot-bootloader', timeout)
 
     def adb_root(self, enable=True, force=False):
-        if enable:
-            if self._connected_as_root and not force:
-                return
-            adb_command(self.adb_name, 'root', timeout=30)
-            self._connected_as_root = True
+        if not isinstance(self.conn, AdbConnection):
+            raise TargetStableError('Cannot enable adb root without adb connection')
+        if enable and self.connected_as_root and not force:
             return
-        adb_command(self.adb_name, 'unroot', timeout=30)
-        self._connected_as_root = False
+        self.conn.adb_root(self.adb_name, enable=enable)
 
     def is_screen_on(self):
         output = self.execute('dumpsys power')
