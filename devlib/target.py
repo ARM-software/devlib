@@ -1390,7 +1390,14 @@ class AndroidTarget(Target):
             if self.get_sdk_version() >= 23:
                 flags.append('-g')  # Grant all runtime permissions
             self.logger.debug("Replace APK = {}, ADB flags = '{}'".format(replace, ' '.join(flags)))
-            return adb_command(self.adb_name, "install {} {}".format(' '.join(flags), quote(filepath)), timeout=timeout)
+            if isinstance(self.conn, AdbConnection):
+                return adb_command(self.adb_name, "install {} {}".format(' '.join(flags), quote(filepath)), timeout=timeout)
+            else:
+                dev_path = self.get_workpath(filepath.rsplit(os.path.sep, 1)[-1])
+                self.push(quote(filepath), dev_path, timeout=timeout)
+                result = self.execute("pm install {} {}".format(' '.join(flags), quote(dev_path)), timeout=timeout)
+                self.remove(dev_path)
+                return result
         else:
             raise TargetStableError('Can\'t install {}: unsupported format.'.format(filepath))
 
@@ -1451,7 +1458,10 @@ class AndroidTarget(Target):
         return on_device_executable
 
     def uninstall_package(self, package):
-        adb_command(self.adb_name, "uninstall {}".format(quote(package)), timeout=30)
+        if isinstance(self.conn, AdbConnection):
+            adb_command(self.adb_name, "uninstall {}".format(quote(package)), timeout=30)
+        else:
+            self.execute("pm uninstall {}".format(quote(package)), timeout=30)
 
     def uninstall_executable(self, executable_name):
         on_device_executable = self.path.join(self.executables_directory, executable_name)
@@ -1461,23 +1471,39 @@ class AndroidTarget(Target):
     def dump_logcat(self, filepath, filter=None, append=False, timeout=30):  # pylint: disable=redefined-builtin
         op = '>>' if append else '>'
         filtstr = ' -s {}'.format(quote(filter)) if filter else ''
-        command = 'logcat -d{} {} {}'.format(filtstr, op, quote(filepath))
-        adb_command(self.adb_name, command, timeout=timeout)
+        if isinstance(self.conn, AdbConnection):
+            command = 'logcat -d{} {} {}'.format(filtstr, op, quote(filepath))
+            adb_command(self.adb_name, command, timeout=timeout)
+        else:
+            dev_path = self.get_workpath('logcat')
+            command = 'logcat -d{} {} {}'.format(filtstr, op, quote(dev_path))
+            self.execute(command, timeout=timeout)
+            self.pull(dev_path, filepath)
+            self.remove(dev_path)
 
     def clear_logcat(self):
         with self.clear_logcat_lock:
-            adb_command(self.adb_name, 'logcat -c', timeout=30)
+            if isinstance(self.conn, AdbConnection):
+                adb_command(self.adb_name, 'logcat -c', timeout=30)
+            else:
+                self.execute('logcat -c', timeout=30)
 
     def get_logcat_monitor(self, regexps=None):
         return LogcatMonitor(self, regexps)
 
     def adb_kill_server(self, timeout=30):
+        if not isinstance(self.conn, AdbConnection):
+            raise TargetStableError('Cannot issues adb command without adb connection')
         adb_command(self.adb_name, 'kill-server', timeout)
 
     def adb_wait_for_device(self, timeout=30):
+        if not isinstance(self.conn, AdbConnection):
+            raise TargetStableError('Cannot issues adb command without adb connection')
         adb_command(self.adb_name, 'wait-for-device', timeout)
 
     def adb_reboot_bootloader(self, timeout=30):
+        if not isinstance(self.conn, AdbConnection):
+            raise TargetStableError('Cannot issues adb command without adb connection')
         adb_command(self.adb_name, 'reboot-bootloader', timeout)
 
     def adb_root(self, enable=True, force=False):
