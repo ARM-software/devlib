@@ -166,6 +166,7 @@ class DmesgCollector(TraceCollector):
             return [
                 KernelLogEntry.from_str(line)
                 for line in dmesg_out.splitlines()
+                if line.strip()
             ]
 
     def reset(self):
@@ -195,4 +196,3 @@ class DmesgCollector(TraceCollector):
     def get_trace(self, outfile):
         with open(outfile, 'wt') as f:
             f.write(self.dmesg_out + '\n')
-
