@@ -232,7 +232,7 @@ Target
    :param timeout: timeout (in seconds) for the transfer; if the transfer does
        not  complete within this period, an exception will be raised.
 
-.. method:: Target.execute(command [, timeout [, check_exit_code [, as_root [, strip_colors [, will_succeed]]]]])
+.. method:: Target.execute(command [, timeout [, check_exit_code [, as_root [, strip_colors [, will_succeed [, force_locale]]]]]])
 
    Execute the specified command on the target device and return its output.
 
@@ -252,6 +252,9 @@ Target
        will make the method always raise an instance of a subclass of
        :class:`DevlibTransientError` when the command fails, instead of a
        :class:`DevlibStableError`.
+   :param force_locale: Prepend ``LC_ALL=<force_locale>`` in front of the
+      command to get predictable output that can be more safely parsed.
+      If ``None``, no locale is prepended.
 
 .. method:: Target.background(command [, stdout [, stderr [, as_root]]])
 
