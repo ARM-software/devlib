@@ -385,10 +385,19 @@ class Target(object):
     # execution
 
     def execute(self, command, timeout=None, check_exit_code=True,
-                as_root=False, strip_colors=True, will_succeed=False):
+                as_root=False, strip_colors=True, will_succeed=False,
+                force_locale='C'):
+
+        # Force the locale if necessary for more predictable output
+        if force_locale:
+            # Use an explicit export so that the command is allowed to be any
+            # shell statement, rather than just a command invocation
+            command = 'export LC_ALL={} && {}'.format(quote(force_locale), command)
+
         # Ensure to use deployed command when availables
         if self.executables_directory:
             command = "PATH={}:$PATH && {}".format(self.executables_directory, command)
+
         return self.conn.execute(command, timeout=timeout,
                 check_exit_code=check_exit_code, as_root=as_root,
                 strip_colors=strip_colors, will_succeed=will_succeed)
