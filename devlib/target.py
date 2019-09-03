@@ -396,7 +396,7 @@ class Target(object):
 
         # Ensure to use deployed command when availables
         if self.executables_directory:
-            command = "export PATH={}:$PATH && {}".format(self.executables_directory, command)
+            command = "export PATH={}:$PATH && {}".format(quote(self.executables_directory), command)
 
         return self.conn.execute(command, timeout=timeout,
                 check_exit_code=check_exit_code, as_root=as_root,
