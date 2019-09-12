@@ -641,12 +641,12 @@ class Target(object):
 
     which = get_installed
 
-    def install_if_needed(self, host_path, search_system_binaries=True):
+    def install_if_needed(self, host_path, search_system_binaries=True, timeout=None):
 
         binary_path = self.get_installed(os.path.split(host_path)[1],
                                          search_system_binaries=search_system_binaries)
         if not binary_path:
-            binary_path = self.install(host_path)
+            binary_path = self.install(host_path, timeout=timeout)
         return binary_path
 
     def is_installed(self, name):
@@ -1025,7 +1025,7 @@ class LinuxTarget(Target):
     def install(self, filepath, timeout=None, with_name=None):  # pylint: disable=W0221
         destpath = self.path.join(self.executables_directory,
                                   with_name and with_name or self.path.basename(filepath))
-        self.push(filepath, destpath)
+        self.push(filepath, destpath, timeout=timeout)
         self.execute('chmod a+x {}'.format(quote(destpath)), timeout=timeout)
         self._installed_binaries[self.path.basename(destpath)] = destpath
         return destpath
@@ -1249,7 +1249,7 @@ class AndroidTarget(Target):
         if ext == '.apk':
             return self.install_apk(filepath, timeout)
         else:
-            return self.install_executable(filepath, with_name)
+            return self.install_executable(filepath, with_name, timeout)
 
     def uninstall(self, name):
         if self.package_is_installed(name):
@@ -1466,14 +1466,15 @@ class AndroidTarget(Target):
                   '-n com.android.providers.media/.MediaScannerReceiver'
         self.execute(command.format(quote('file://'+dirpath)), as_root=as_root)
 
-    def install_executable(self, filepath, with_name=None):
+    def install_executable(self, filepath, with_name=None, timeout=None):
         self._ensure_executables_directory_is_writable()
         executable_name = with_name or os.path.basename(filepath)
         on_device_file = self.path.join(self.working_directory, executable_name)
         on_device_executable = self.path.join(self.executables_directory, executable_name)
-        self.push(filepath, on_device_file)
+        self.push(filepath, on_device_file, timeout=timeout)
         if on_device_file != on_device_executable:
-            self.execute('cp {} {}'.format(quote(on_device_file), quote(on_device_executable)), as_root=self.needs_su)
+            self.execute('cp {} {}'.format(quote(on_device_file), quote(on_device_executable)),
+                         as_root=self.needs_su, timeout=timeout)
             self.remove(on_device_file, as_root=self.needs_su)
         self.execute("chmod 0777 {}".format(quote(on_device_executable)), as_root=self.needs_su)
         self._installed_binaries[executable_name] = on_device_executable
