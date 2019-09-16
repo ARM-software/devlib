@@ -1534,7 +1534,7 @@ class AndroidTarget(Target):
             raise TargetStableError('Cannot enable adb root without adb connection')
         if enable and self.connected_as_root and not force:
             return
-        self.conn.adb_root(self.adb_name, enable=enable)
+        self.conn.adb_root(enable=enable)
 
     def is_screen_on(self):
         output = self.execute('dumpsys power')
