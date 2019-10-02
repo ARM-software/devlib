@@ -142,3 +142,7 @@ class ArmEnergyProbeInstrument(Instrument):
 
     def get_raw(self):
         return [self.output_file_raw]
+
+    def teardown(self):
+        if os.path.isfile(self.output_file_raw):
+            os.remove(self.output_file_raw)

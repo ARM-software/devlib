@@ -126,3 +126,7 @@ class EnergyProbeInstrument(Instrument):
 
     def get_raw(self):
         return [self.raw_data_file]
+
+    def teardown(self):
+        if os.path.isfile(self.raw_data_file):
+            os.remove(self.raw_data_file)

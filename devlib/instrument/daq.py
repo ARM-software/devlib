@@ -14,6 +14,7 @@
 #
 
 import os
+import shutil
 import tempfile
 from itertools import chain
 
@@ -154,6 +155,8 @@ class DaqInstrument(Instrument):
 
     def teardown(self):
         self.execute('close')
+        if os.path.isdir(tempdir):
+            shutil.rmtree(tempdir)
 
     def execute(self, command, **kwargs):
         return execute_command(self.server_config, command, **kwargs)
