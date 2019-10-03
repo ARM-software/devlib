@@ -168,6 +168,17 @@ Instrument
    generated or saved, an empty list will be returned. The format of the
    contents of the raw files is entirely source-dependent.
 
+  .. note:: This method is not guaranteed to return valid filepaths after the
+            :meth:`teardown` method has been invoked as the raw files may have
+            been deleted. Please ensure that copies are created manually
+            prior to calling :meth:`teardown` if the files are to be retained.
+
+.. method:: Instrument.teardown()
+
+   Performs any required clean up of the instrument. This usually includes
+   removing temporary and raw files (if ``keep_raw`` is set to ``False`` on relevant
+   instruments), stopping services etc.
+
 .. attribute:: Instrument.sample_rate_hz
 
    Sample rate of the instrument in Hz. Assumed to be the same for all channels.
