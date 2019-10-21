@@ -796,6 +796,18 @@ class Target(object):
                                                 strip_null_chars)
         return _build_path_tree(value_map, path, self.path.sep, dictcls)
 
+    def install_module(self, mod, **params):
+        mod = get_module(mod)
+        if mod.stage == 'early':
+            msg = 'Module {} cannot be installed after device setup has already occoured.'
+            raise TargetStableError(msg)
+
+        if mod.probe(self):
+            self._install_module(mod, **params)
+        else:
+            msg = 'Module {} is not supported by the target'.format(mod.name)
+            raise TargetStableError(msg)
+
     # internal methods
 
     def _setup_shutils(self):
