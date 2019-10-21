@@ -877,7 +877,11 @@ class Target(object):
     def _install_module(self, mod, **params):
         if mod.name not in self._installed_modules:
             self.logger.debug('Installing module {}'.format(mod.name))
-            mod.install(self, **params)
+            try:
+                mod.install(self, **params)
+            except Exception as e:
+                self.logger.error('Module "{}" failed to install on target'.format(mod.name))
+                raise
             self._installed_modules[mod.name] = mod
         else:
             self.logger.debug('Module {} is already installed.'.format(mod.name))
