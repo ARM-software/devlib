@@ -64,6 +64,7 @@ class FtraceCollector(TraceCollector):
                  strict=False,
                  report_on_target=False,
                  trace_clock='local',
+                 saved_cmdlines_nr=4096,
                  ):
         super(FtraceCollector, self).__init__(target)
         self.events = events if events is not None else DEFAULT_EVENTS
@@ -85,6 +86,7 @@ class FtraceCollector(TraceCollector):
         self.event_string = None
         self.function_string = None
         self.trace_clock = trace_clock
+        self.saved_cmdlines_nr = saved_cmdlines_nr
         self._reset_needed = True
 
         # pylint: disable=bad-whitespace
@@ -97,6 +99,7 @@ class FtraceCollector(TraceCollector):
         self.marker_file              = self.target.path.join(self.tracing_path, 'trace_marker')
         self.ftrace_filter_file       = self.target.path.join(self.tracing_path, 'set_ftrace_filter')
         self.trace_clock_file         = self.target.path.join(self.tracing_path, 'trace_clock')
+        self.save_cmdlines_size_file  = self.target.path.join(self.tracing_path, 'saved_cmdlines_size')
 
         self.host_binary = which('trace-cmd')
         self.kernelshark = which('kernelshark')
@@ -175,6 +178,7 @@ class FtraceCollector(TraceCollector):
             self.reset()
 
         self.target.write_value(self.trace_clock_file, self.trace_clock, verify=False)
+        self.target.write_value(self.save_cmdlines_size_file, self.saved_cmdlines_nr)
         self.target.execute('{} start {}'.format(self.target_binary, self.event_string),
                             as_root=True)
         if self.automark:
