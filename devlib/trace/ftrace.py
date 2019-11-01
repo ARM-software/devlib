@@ -20,6 +20,7 @@ import time
 import re
 import subprocess
 import sys
+from pipes import quote
 
 from devlib.trace import TraceCollector
 from devlib.host import PACKAGE_BIN_DIRECTORY
@@ -54,6 +55,8 @@ class FtraceCollector(TraceCollector):
     def __init__(self, target,
                  events=None,
                  functions=None,
+                 tracer=None,
+                 trace_children_functions=False,
                  buffer_size=None,
                  buffer_size_step=1000,
                  tracing_path='/sys/kernel/debug/tracing',
@@ -69,6 +72,8 @@ class FtraceCollector(TraceCollector):
         super(FtraceCollector, self).__init__(target)
         self.events = events if events is not None else DEFAULT_EVENTS
         self.functions = functions
+        self.tracer = tracer
+        self.trace_children_functions = trace_children_functions
         self.buffer_size = buffer_size
         self.buffer_size_step = buffer_size_step
         self.tracing_path = tracing_path
@@ -137,13 +142,6 @@ class FtraceCollector(TraceCollector):
                 self.target.logger.warning(message)
             else:
                 selected_events.append(event)
-        # If function profiling is enabled we always need at least one event.
-        # Thus, if not other events have been specified, try to add at least
-        # a tracepoint which is always available and possibly triggered few
-        # times.
-        if self.functions and not selected_events:
-            selected_events = ['sched_wakeup_new']
-        self.event_string = _build_trace_events(selected_events)
 
         # Check for function tracing support
         if self.functions:
@@ -163,7 +161,19 @@ class FtraceCollector(TraceCollector):
                     self.target.logger.warning(message)
                 else:
                     selected_functions.append(function)
-            self.function_string = _build_trace_functions(selected_functions)
+
+            if self.tracer is None:
+                self.function_string = _build_trace_functions(selected_functions)
+                # If function profiling is enabled we always need at least one event.
+                # Thus, if not other events have been specified, try to add at least
+                # a tracepoint which is always available and possibly triggered few
+                # times.
+                if not selected_events:
+                    selected_events = ['sched_wakeup_new']
+            elif self.tracer == 'function_graph':
+                self.function_string = _build_graph_functions(selected_functions, trace_children_functions)
+
+        self.event_string = _build_trace_events(selected_events)
 
     def reset(self):
         if self.buffer_size:
@@ -177,10 +187,24 @@ class FtraceCollector(TraceCollector):
         if self._reset_needed:
             self.reset()
 
+        if self.tracer is not None and 'function' in self.tracer:
+            tracecmd_functions = self.function_string
+        else:
+            tracecmd_functions = ''
+
+        tracer_string = '-p {}'.format(self.tracer) if self.tracer else ''
+
         self.target.write_value(self.trace_clock_file, self.trace_clock, verify=False)
         self.target.write_value(self.save_cmdlines_size_file, self.saved_cmdlines_nr)
-        self.target.execute('{} start {}'.format(self.target_binary, self.event_string),
-                            as_root=True)
+        self.target.execute(
+            '{} start {events} {tracer} {functions}'.format(
+                self.target_binary,
+                events=self.event_string,
+                tracer=tracer_string,
+                functions=tracecmd_functions,
+            ),
+            as_root=True,
+        )
         if self.automark:
             self.mark_start()
         if 'cpufreq' in self.target.modules:
@@ -190,7 +214,7 @@ class FtraceCollector(TraceCollector):
             self.logger.debug('Trace CPUIdle states')
             self.target.cpuidle.perturb_cpus()
         # Enable kernel function profiling
-        if self.functions:
+        if self.functions and self.tracer is None:
             self.target.execute('echo nop > {}'.format(self.current_tracer_file),
                                 as_root=True)
             self.target.execute('echo 0 > {}'.format(self.function_profile_file),
@@ -203,7 +227,7 @@ class FtraceCollector(TraceCollector):
 
     def stop(self):
         # Disable kernel function profiling
-        if self.functions:
+        if self.functions and self.tracer is None:
             self.target.execute('echo 1 > {}'.format(self.function_profile_file),
                                 as_root=True)
         if 'cpufreq' in self.target.modules:
@@ -243,7 +267,7 @@ class FtraceCollector(TraceCollector):
                 self.view(outfile)
 
     def get_stats(self, outfile):
-        if not self.functions:
+        if not (self.functions and self.tracer is None):
             return
 
         if os.path.isdir(outfile):
@@ -360,3 +384,10 @@ def _build_trace_events(events):
 def _build_trace_functions(functions):
     function_string = " ".join(functions)
     return function_string
+
+def _build_graph_functions(functions, trace_children_functions):
+    opt = 'g' if trace_children_functions else 'l'
+    return ' '.join(
+        '-{} {}'.format(opt, quote(f))
+        for f in functions
+    )
