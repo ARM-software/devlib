@@ -25,7 +25,7 @@ from pipes import quote
 from devlib.trace import TraceCollector
 from devlib.host import PACKAGE_BIN_DIRECTORY
 from devlib.exception import TargetStableError, HostError
-from devlib.utils.misc import check_output, which
+from devlib.utils.misc import check_output, which, memoized
 
 
 TRACE_MARKER_START = 'TRACE_MARKER_START'
@@ -105,6 +105,7 @@ class FtraceCollector(TraceCollector):
         self.ftrace_filter_file       = self.target.path.join(self.tracing_path, 'set_ftrace_filter')
         self.trace_clock_file         = self.target.path.join(self.tracing_path, 'trace_clock')
         self.save_cmdlines_size_file  = self.target.path.join(self.tracing_path, 'saved_cmdlines_size')
+        self.available_tracers_file  = self.target.path.join(self.tracing_path, 'available_tracers')
 
         self.host_binary = which('trace-cmd')
         self.kernelshark = which('kernelshark')
@@ -143,6 +144,10 @@ class FtraceCollector(TraceCollector):
             else:
                 selected_events.append(event)
 
+        if self.tracer and self.tracer not in self.available_tracers:
+            raise TargetStableError('Unsupported tracer "{}". Available tracers: {}'.format(
+                self.tracer, ', '.join(self.available_tracers)))
+
         # Check for function tracing support
         if self.functions:
             if not self.target.file_exists(self.function_profile_file):
@@ -174,6 +179,15 @@ class FtraceCollector(TraceCollector):
                 self.function_string = _build_graph_functions(selected_functions, trace_children_functions)
 
         self.event_string = _build_trace_events(selected_events)
+
+
+    @property
+    @memoized
+    def available_tracers(self):
+        """
+        List of ftrace tracers supported by the target's kernel.
+        """
+        return self.target.read_value(self.available_tracers_file).split(' ')
 
     def reset(self):
         if self.buffer_size:
