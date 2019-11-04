@@ -158,16 +158,16 @@ class Controller(object):
             raise ValueError('wrong type for "exclude" parameter, '
                              'it must be a str or a list')
 
-        logging.debug('Moving all tasks into %s', dest)
+        self.logger.debug('Moving all tasks into %s', dest)
 
         # Build list of tasks to exclude
         grep_filters = ''
         for comm in exclude:
             grep_filters += '-e {} '.format(comm)
-        logging.debug('   using grep filter: %s', grep_filters)
+        self.logger.debug('   using grep filter: %s', grep_filters)
         if grep_filters != '':
-            logging.debug('   excluding tasks which name matches:')
-            logging.debug('   %s', ', '.join(exclude))
+            self.logger.debug('   excluding tasks which name matches:')
+            self.logger.debug('   %s', ', '.join(exclude))
 
         for cgroup in self._cgroups:
             if cgroup != dest:
@@ -288,10 +288,8 @@ class CGroup(object):
     def get(self):
         conf = {}
 
-        logging.debug('Reading %s attributes from:',
-                self.controller.kind)
-        logging.debug('  %s',
-                self.directory)
+        self.logger.debug('Reading %s attributes from:', self.controller.kind)
+        self.logger.debug('  %s', self.directory)
         output = self.target._execute_util(  # pylint: disable=protected-access
                     'cgroups_get_attributes {} {}'.format(
                     self.directory, self.controller.kind),
@@ -330,7 +328,7 @@ class CGroup(object):
 
     def get_tasks(self):
         task_ids = self.target.read_value(self.tasks_file).split()
-        logging.debug('Tasks: %s', task_ids)
+        self.logger.debug('Tasks: %s', task_ids)
         return list(map(int, task_ids))
 
     def add_task(self, tid):
