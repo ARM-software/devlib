@@ -124,11 +124,10 @@ class Controller(object):
     def move_tasks(self, source, dest, exclude=None):
         if exclude is None:
             exclude = []
-        try:
-            srcg = self._cgroups[source]
-            dstg = self._cgroups[dest]
-        except KeyError as e:
-            raise ValueError('Unknown group: {}'.format(e))
+
+        srcg = self.cgroup(source)
+        dstg = self.cgroup(dest)
+
         self.target._execute_util(  # pylint: disable=protected-access
                     'cgroups_tasks_move {} {} \'{}\''.format(
                     srcg.directory, dstg.directory, exclude),
@@ -169,7 +168,7 @@ class Controller(object):
             self.logger.debug('   excluding tasks which name matches:')
             self.logger.debug('   %s', ', '.join(exclude))
 
-        for cgroup in self._cgroups:
+        for cgroup in self.list_all():
             if cgroup != dest:
                 self.move_tasks(cgroup, dest, grep_filters)
 
