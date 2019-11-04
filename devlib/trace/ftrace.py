@@ -125,21 +125,33 @@ class FtraceCollector(TraceCollector):
             self.target_binary = 'trace-cmd'
 
         # Validate required events to be traced
-        selected_events = []
-        for event in self.events:
-            # Convert globs supported by FTrace into valid regexp globs
-            _event = event
-            if event[0] != '*':
-                _event = '*' + event
-            event_re = re.compile(_event.replace('*', '.*'))
-            # Select events matching the required ones
-            if not list(filter(event_re.match, self.available_events)):
-                message = 'Event [{}] not available for tracing'.format(event)
-                if strict:
-                    raise TargetStableError(message)
-                self.target.logger.warning(message)
+        def event_to_regex(event):
+            if not event.startswith('*'):
+                event = '*' + event
+
+            return re.compile(event.replace('*', '.*'))
+
+        def event_is_in_list(event, events):
+            return any(
+                event_to_regex(event).match(_event)
+                for _event in events
+            )
+
+        unavailable_events = [
+            event
+            for event in self.events
+            if not event_is_in_list(event, self.available_events)
+        ]
+        if unavailable_events:
+            message = 'Events not available for tracing: {}'.format(
+                ', '.join(unavailable_events)
+            )
+            if strict:
+                raise TargetStableError(message)
             else:
-                selected_events.append(event)
+                self.target.logger.warning(message)
+
+        selected_events = sorted(set(self.events) - set(unavailable_events))
 
         if self.tracer and self.tracer not in self.available_tracers:
             raise TargetStableError('Unsupported tracer "{}". Available tracers: {}'.format(
