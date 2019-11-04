@@ -125,9 +125,6 @@ class FtraceCollector(TraceCollector):
             self.target_binary = 'trace-cmd'
 
         # Validate required events to be traced
-        available_events = self.target.execute(
-                'cat {}'.format(self.available_events_file),
-                as_root=True).splitlines()
         selected_events = []
         for event in self.events:
             # Convert globs supported by FTrace into valid regexp globs
@@ -136,7 +133,7 @@ class FtraceCollector(TraceCollector):
                 _event = '*' + event
             event_re = re.compile(_event.replace('*', '.*'))
             # Select events matching the required ones
-            if not list(filter(event_re.match, available_events)):
+            if not list(filter(event_re.match, self.available_events)):
                 message = 'Event [{}] not available for tracing'.format(event)
                 if strict:
                     raise TargetStableError(message)
@@ -188,6 +185,14 @@ class FtraceCollector(TraceCollector):
         List of ftrace tracers supported by the target's kernel.
         """
         return self.target.read_value(self.available_tracers_file).split(' ')
+
+    @property
+    @memoized
+    def available_events(self):
+        """
+        List of ftrace events supported by the target's kernel.
+        """
+        return self.target.read_value(self.available_events_file).splitlines()
 
     def reset(self):
         if self.buffer_size:
