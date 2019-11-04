@@ -80,6 +80,7 @@ class FtraceCollector(TraceCollector):
         self.automark = automark
         self.autoreport = autoreport
         self.autoview = autoview
+        self.strict = strict
         self.report_on_target = report_on_target
         self.target_output_file = target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE)
         text_file_name = target.path.splitext(OUTPUT_TRACE_FILE)[0] + '.txt'
@@ -146,7 +147,7 @@ class FtraceCollector(TraceCollector):
             message = 'Events not available for tracing: {}'.format(
                 ', '.join(unavailable_events)
             )
-            if strict:
+            if self.strict:
                 raise TargetStableError(message)
             else:
                 self.target.logger.warning(message)
@@ -170,7 +171,7 @@ class FtraceCollector(TraceCollector):
             for function in self.functions:
                 if function not in available_functions:
                     message = 'Function [{}] not available for profiling'.format(function)
-                    if strict:
+                    if self.strict:
                         raise TargetStableError(message)
                     self.target.logger.warning(message)
                 else:
@@ -226,7 +227,17 @@ class FtraceCollector(TraceCollector):
         tracer_string = '-p {}'.format(self.tracer) if self.tracer else ''
 
         self.target.write_value(self.trace_clock_file, self.trace_clock, verify=False)
-        self.target.write_value(self.save_cmdlines_size_file, self.saved_cmdlines_nr)
+        try:
+            self.target.write_value(self.save_cmdlines_size_file, self.saved_cmdlines_nr)
+        except TargetStableError as e:
+            message = 'Could not set "save_cmdlines_size"'
+            if self.strict:
+                self.logger.error(message)
+                raise e
+            else:
+                self.logger.warning(message)
+                self.logger.debug(e)
+
         self.target.execute(
             '{} start {events} {tracer} {functions}'.format(
                 self.target_binary,
