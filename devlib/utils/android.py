@@ -317,7 +317,7 @@ class AdbConnection(object):
         AdbConnection.active_connections[self.device] -= 1
         if AdbConnection.active_connections[self.device] <= 0:
             if self.adb_as_root:
-                adb_root(self.device, enable=False)
+                self.adb_root(self.device, enable=False)
             adb_disconnect(self.device)
             del AdbConnection.active_connections[self.device]
 
@@ -333,6 +333,12 @@ class AdbConnection(object):
         if 'cannot run as root in production builds' in output:
             raise TargetStableError(output)
         AdbConnection._connected_as_root[self.device] = enable
+
+    def wait_for_device(self, timeout=30):
+        adb_command(self.device, 'wait-for-device', timeout)
+
+    def reboot_bootloader(self, timeout=30):
+        adb_command(self.device, 'reboot-bootloader', timeout)
 
     # Again, we need to handle boards where the default output format from ls is
     # single column *and* boards where the default output is multi-column.
@@ -543,6 +549,8 @@ def adb_background_shell(device, command,
     logger.debug(full_command)
     return subprocess.Popen(full_command, stdout=stdout, stderr=stderr, shell=True)
 
+def adb_kill_server(self, timeout=30):
+    adb_command(None, 'kill-server', timeout)
 
 def adb_list_devices(adb_server=None):
     output = adb_command(None, 'devices', adb_server=adb_server)

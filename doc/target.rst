@@ -647,6 +647,14 @@ Android Target
    Returns ``True`` if the targets screen is currently on and ``False``
    otherwise.
 
+.. method:: AndroidTarget.wait_for_target(timeout=30)
+
+    Returns when the devices becomes available withing the given timeout
+    otherwise returns a ``TimeoutError``.
+
+.. method:: AndroidTarget.reboot_bootloader(timeout=30)
+    Attempts to reboot the target into it's bootloader.
+
 .. method:: AndroidTarget.homescreen()
 
    Returns the device to its home screen.

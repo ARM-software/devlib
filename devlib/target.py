@@ -1530,27 +1530,11 @@ class AndroidTarget(Target):
     def get_logcat_monitor(self, regexps=None):
         return LogcatMonitor(self, regexps)
 
-    def adb_kill_server(self, timeout=30):
-        if not isinstance(self.conn, AdbConnection):
-            raise TargetStableError('Cannot issues adb command without adb connection')
-        adb_command(self.adb_name, 'kill-server', timeout)
+    def wait_for_device(self, timeout=30):
+        self.conn.wait_for_device()
 
-    def adb_wait_for_device(self, timeout=30):
-        if not isinstance(self.conn, AdbConnection):
-            raise TargetStableError('Cannot issues adb command without adb connection')
-        adb_command(self.adb_name, 'wait-for-device', timeout)
-
-    def adb_reboot_bootloader(self, timeout=30):
-        if not isinstance(self.conn, AdbConnection):
-            raise TargetStableError('Cannot issues adb command without adb connection')
-        adb_command(self.adb_name, 'reboot-bootloader', timeout)
-
-    def adb_root(self, enable=True, force=False):
-        if not isinstance(self.conn, AdbConnection):
-            raise TargetStableError('Cannot enable adb root without adb connection')
-        if enable and self.connected_as_root and not force:
-            return
-        self.conn.adb_root(enable=enable)
+    def reboot_bootloader(self, timeout=30):
+        self.conn.reboot_bootloader()
 
     def is_screen_on(self):
         output = self.execute('dumpsys power')
