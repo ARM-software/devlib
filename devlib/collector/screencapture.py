@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 
-from devlib.trace import TraceCollector
+from devlib.collector import BaseCollector
 from devlib.exception import WorkerThreadError
 
 
@@ -66,7 +66,7 @@ class ScreenCapturePoller(threading.Thread):
         self.target.capture_screen(os.path.join(self.output_path, "screencap_{ts}.png"))
 
 
-class ScreenCaptureCollector(TraceCollector):
+class ScreenCaptureCollector(BaseCollector):
 
     def __init__(self, target, output_path=None, period=None):
         super(ScreenCaptureCollector, self).__init__(target)
