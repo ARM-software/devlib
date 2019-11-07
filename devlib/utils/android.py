@@ -424,6 +424,12 @@ def adb_connect(device, timeout=None, attempts=MAX_ATTEMPTS):
         tries += 1
         if device:
             if "." in device: # Connect is required only for ADB-over-IP
+                # ADB does not automatically remove a network device from it's
+                # devices list when the connection is broken by the remote, so the
+                # adb connection may have gone "stale", resulting in adb blocking
+                # indefinitely when making calls to the device. To avoid this,
+                # always disconnect first.
+                adb_disconnect(device)
                 command = 'adb connect {}'.format(quote(device))
                 logger.debug(command)
                 output, _ = check_output(command, shell=True, timeout=timeout)

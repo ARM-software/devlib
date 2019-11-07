@@ -1225,13 +1225,6 @@ class AndroidTarget(Target):
 
     def connect(self, timeout=30, check_boot_completed=True):  # pylint: disable=arguments-differ
         device = self.connection_settings.get('device')
-        if device and ':' in device:
-            # ADB does not automatically remove a network device from it's
-            # devices list when the connection is broken by the remote, so the
-            # adb connection may have gone "stale", resulting in adb blocking
-            # indefinitely when making calls to the device. To avoid this,
-            # always disconnect first.
-            adb_disconnect(device)
         super(AndroidTarget, self).connect(timeout=timeout, check_boot_completed=check_boot_completed)
 
     def kick_off(self, command, as_root=None):
