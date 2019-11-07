@@ -16,10 +16,10 @@
 import os
 import shutil
 
-from devlib.trace import TraceCollector
+from devlib.collector import CollectorBase
 from devlib.utils.android import LogcatMonitor
 
-class LogcatCollector(TraceCollector):
+class LogcatCollector(CollectorBase):
 
     def __init__(self, target, regexps=None):
         super(LogcatCollector, self).__init__(target)

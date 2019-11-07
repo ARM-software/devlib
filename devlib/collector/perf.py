@@ -19,13 +19,13 @@ import time
 from past.builtins import basestring, zip
 
 from devlib.host import PACKAGE_BIN_DIRECTORY
-from devlib.trace import TraceCollector
+from devlib.collector import CollectorBase
 from devlib.utils.misc import ensure_file_directory_exists as _f
 
 
 PERF_COMMAND_TEMPLATE = '{binary} {command} {options} {events} sleep 1000 > {outfile} 2>&1 '
 PERF_REPORT_COMMAND_TEMPLATE= '{binary} report {options} -i {datafile} > {outfile} 2>&1 '
-PERF_RECORD_COMMAND_TEMPLATE= '{binary} record {options} {events} -o {outfile}' 
+PERF_RECORD_COMMAND_TEMPLATE= '{binary} record {options} {events} -o {outfile}'
 
 PERF_DEFAULT_EVENTS = [
     'cpu-migrations',
@@ -42,7 +42,7 @@ SIMPLEPERF_DEFAULT_EVENTS = [
 
 DEFAULT_EVENTS = {'perf':PERF_DEFAULT_EVENTS, 'simpleperf':SIMPLEPERF_DEFAULT_EVENTS}
 
-class PerfCollector(TraceCollector):
+class PerfCollector(CollectorBase):
     """
     Perf is a Linux profiling with performance counters.
     Simpleperf is an Android profiling tool with performance counters.
@@ -82,7 +82,7 @@ class PerfCollector(TraceCollector):
         man perf-stat
     """
 
-    def __init__(self, 
+    def __init__(self,
                  target,
                  perf_type='perf',
                  command='stat',
@@ -216,7 +216,7 @@ class PerfCollector(TraceCollector):
                 current_tries += 1
             else:
                 if current_tries >= max_tries:
-                    self.logger.warning('''writing {}.data file took longer than expected, 
+                    self.logger.warning('''writing {}.data file took longer than expected,
                                         file may not have written correctly'''.format(label))
                 data_file_finished_writing = True
         report_command = self._build_perf_report_command(self.report_options, label)
@@ -229,7 +229,7 @@ class PerfCollector(TraceCollector):
             if available_event == '':
                 continue
             if 'OR' in available_event:
-                available_events.append(available_event.split('OR')[1]) 
+                available_events.append(available_event.split('OR')[1])
             available_events[available_events.index(available_event)] = available_event.split()[0].strip()
         # Raw hex event codes can also be passed in that do not appear on perf/simpleperf list, prefixed with 'r'
         raw_event_code_regex = re.compile(r"^r(0x|0X)?[A-Fa-f0-9]+$")

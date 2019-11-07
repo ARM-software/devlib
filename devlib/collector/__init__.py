@@ -16,7 +16,7 @@
 import logging
 
 
-class TraceCollector(object):
+class CollectorBase(object):
 
     def __init__(self, target):
         self.target = target

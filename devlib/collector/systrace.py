@@ -20,7 +20,7 @@ from shutil import copyfile
 from tempfile import NamedTemporaryFile
 
 from devlib.exception import TargetStableError, HostError
-from devlib.trace import TraceCollector
+from devlib.collector import CollectorBase
 import devlib.utils.android
 from devlib.utils.misc import memoized
 
@@ -33,7 +33,7 @@ DEFAULT_CATEGORIES = [
     'idle'
 ]
 
-class SystraceCollector(TraceCollector):
+class SystraceCollector(CollectorBase):
     """
     A trace collector based on Systrace
 

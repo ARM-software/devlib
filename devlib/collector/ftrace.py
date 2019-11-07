@@ -23,7 +23,7 @@ import sys
 import contextlib
 from pipes import quote
 
-from devlib.trace import TraceCollector
+from devlib.collector import CollectorBase
 from devlib.host import PACKAGE_BIN_DIRECTORY
 from devlib.exception import TargetStableError, HostError
 from devlib.utils.misc import check_output, which, memoized
@@ -50,7 +50,7 @@ TIMEOUT = 180
 CPU_RE = re.compile(r'  Function \(CPU([0-9]+)\)')
 STATS_RE = re.compile(r'([^ ]*) +([0-9]+) +([0-9.]+) us +([0-9.]+) us +([0-9.]+) us')
 
-class FtraceCollector(TraceCollector):
+class FtraceCollector(CollectorBase):
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     def __init__(self, target,

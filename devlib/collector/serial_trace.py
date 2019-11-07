@@ -17,11 +17,11 @@ import shutil
 from tempfile import NamedTemporaryFile
 from pexpect.exceptions import TIMEOUT
 
-from devlib.trace import TraceCollector
+from devlib.collector import CollectorBase
 from devlib.utils.serial_port import get_connection
 
 
-class SerialTraceCollector(TraceCollector):
+class SerialTraceCollector(CollectorBase):
 
     @property
     def collecting(self):

@@ -18,7 +18,7 @@ import re
 from itertools import takewhile
 from datetime import timedelta
 
-from devlib.trace import TraceCollector
+from devlib.collector import CollectorBase
 
 
 class KernelLogEntry(object):
@@ -121,7 +121,7 @@ class KernelLogEntry(object):
         )
 
 
-class DmesgCollector(TraceCollector):
+class DmesgCollector(CollectorBase):
     """
     Dmesg output collector.
 
