@@ -559,6 +559,24 @@ Target
     Installs an additional module to the target after the initial setup has been
     performed.
 
+Linux Target
+------------
+
+.. class:: LinuxTarget(connection_settings=None, platform=None, working_directory=None, executables_directory=None, connect=True, modules=None, load_default_modules=True, shell_prompt=DEFAULT_SHELL_PROMPT, conn_cls=SshConnection, is_container=False,)
+
+    :class:`LinuxTarget` is a subclass of :class:`~devlib.target.Target`
+    with customisations specific to a device running linux.
+
+
+Local Linux Target
+------------------
+
+.. class:: LocalLinuxTarget(connection_settings=None, platform=None, working_directory=None, executables_directory=None, connect=True, modules=None, load_default_modules=True, shell_prompt=DEFAULT_SHELL_PROMPT, conn_cls=SshConnection, is_container=False,)
+
+    :class:`LocalLinuxTarget` is a subclass of
+    :class:`~devlib.target.LinuxTarget` with customisations specific to using
+    the host machine running linux as the target.
+
 
 Android Target
 ---------------
