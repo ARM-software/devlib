@@ -162,6 +162,27 @@ class Target(object):
 
     @property
     @memoized
+    def number_of_nodes(self):
+        num_nodes = 0
+        nodere = re.compile(r'^\s*node\d+\s*$')
+        output = self.execute('ls /sys/devices/system/node', as_root=self.is_rooted)
+        for entry in output.split():
+            if nodere.match(entry):
+                num_nodes += 1
+        return num_nodes
+
+    @property
+    @memoized
+    def list_nodes_cpus(self):
+        nodes_cpus = []
+        for node in range(self.number_of_nodes):
+            path = self.path.join('/sys/devices/system/node/node{}/cpulist'.format(node))
+            output = self.read_value(path)
+            nodes_cpus.append(ranges_to_list(output))
+        return nodes_cpus
+
+    @property
+    @memoized
     def config(self):
         try:
             return KernelConfig(self.execute('zcat /proc/config.gz'))
