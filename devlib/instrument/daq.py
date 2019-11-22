@@ -24,11 +24,11 @@ from devlib.utils.csvutil import csvwriter, create_reader
 from devlib.utils.misc import unique
 
 try:
-    from daqpower.client import execute_command, Status
-    from daqpower.config import DeviceConfiguration, ServerConfiguration
+    from daqpower.client import DaqClient
+    from daqpower.config import DeviceConfiguration
 except ImportError as e:
-    execute_command, Status = None, None
-    DeviceConfiguration, ServerConfiguration, ConfigurationError = None, None, None
+    DaqClient = None
+    DeviceConfiguration = None
     import_error_mesg = e.args[0] if e.args else str(e)
 
 
@@ -52,21 +52,20 @@ class DaqInstrument(Instrument):
         self.keep_raw = keep_raw
         self._need_reset = True
         self._raw_files = []
-        if execute_command is None:
+        if DaqClient is None:
             raise HostError('Could not import "daqpower": {}'.format(import_error_mesg))
         if labels is None:
             labels = ['PORT_{}'.format(i) for i in range(len(resistor_values))]
         if len(labels) != len(resistor_values):
             raise ValueError('"labels" and "resistor_values" must be of the same length')
-        self.server_config = ServerConfiguration(host=host,
-                                                 port=port)
-        result = self.execute('list_devices')
-        if result.status == Status.OK:
-            if device_id not in result.data:
+        self.daq_client = DaqClient(host, port)
+        try:
+            devices = self.daq_client.list_devices()
+            if device_id not in devices:
                 msg = 'Device "{}" is not found on the DAQ server. Available devices are: "{}"'
                 raise ValueError(msg.format(device_id, ', '.join(result.data)))
-        elif result.status != Status.OKISH:
-            raise HostError('Problem querying DAQ server: {}'.format(result.message))
+        except Exception as e:
+            raise HostError('Problem querying DAQ server: {}'.format(e))
 
         self.device_config = DeviceConfiguration(device_id=device_id,
                                                  v_range=v_range,
@@ -83,25 +82,23 @@ class DaqInstrument(Instrument):
 
     def reset(self, sites=None, kinds=None, channels=None):
         super(DaqInstrument, self).reset(sites, kinds, channels)
-        self.execute('close')
-        result = self.execute('configure', config=self.device_config)
-        if not result.status == Status.OK:  # pylint: disable=no-member
-            raise HostError(result.message)
+        self.daq_client.close()
+        self.daq_client.configure(self.device_config)
         self._need_reset = False
         self._raw_files = []
 
     def start(self):
         if self._need_reset:
             self.reset()
-        self.execute('start')
+        self.daq_client.start()
 
     def stop(self):
-        self.execute('stop')
+        self.daq_client.stop()
         self._need_reset = True
 
     def get_data(self, outfile):  # pylint: disable=R0914
         tempdir = tempfile.mkdtemp(prefix='daq-raw-')
-        self.execute('get_data', output_directory=tempdir)
+        self.daq_client.get_data(tempdir)
         raw_file_map = {}
         for entry in os.listdir(tempdir):
             site = os.path.splitext(entry)[0]
@@ -156,10 +153,7 @@ class DaqInstrument(Instrument):
         return self._raw_files
 
     def teardown(self):
-        self.execute('close')
+        self.daq_client.close()
         if not self.keep_raw:
             if os.path.isdir(tempdir):
                 shutil.rmtree(tempdir)
-
-    def execute(self, command, **kwargs):
-        return execute_command(self.server_config, command, **kwargs)
