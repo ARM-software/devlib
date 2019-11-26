@@ -161,9 +161,6 @@ class FtraceCollector(TraceCollector):
 
         # Check for function tracing support
         if self.functions:
-            if not self.target.file_exists(self.function_profile_file):
-                raise TargetStableError('Function profiling not supported. '\
-                        'A kernel build with CONFIG_FUNCTION_PROFILER enable is required')
             # Validate required functions to be traced
             available_functions = self.target.execute(
                     'cat {}'.format(self.available_functions_file),
@@ -178,7 +175,11 @@ class FtraceCollector(TraceCollector):
                 else:
                     selected_functions.append(function)
 
+            # Function profiling
             if self.tracer is None:
+                if not self.target.file_exists(self.function_profile_file):
+                    raise TargetStableError('Function profiling not supported. '\
+                                            'A kernel build with CONFIG_FUNCTION_PROFILER enable is required')
                 self.function_string = _build_trace_functions(selected_functions)
                 # If function profiling is enabled we always need at least one event.
                 # Thus, if not other events have been specified, try to add at least
