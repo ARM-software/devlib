@@ -184,6 +184,12 @@ class FtraceCollector(TraceCollector):
                 # times.
                 if not selected_events:
                     selected_events = ['sched_wakeup_new']
+
+            # Function tracing
+            elif self.tracer == 'function':
+                self.function_string = _build_graph_functions(selected_functions, False)
+
+            # Function graphing
             elif self.tracer == 'function_graph':
                 self.function_string = _build_graph_functions(selected_functions, trace_children_functions)
 
