@@ -162,13 +162,10 @@ class FtraceCollector(TraceCollector):
         # Check for function tracing support
         if self.functions:
             # Validate required functions to be traced
-            available_functions = self.target.execute(
-                    'cat {}'.format(self.available_functions_file),
-                    as_root=True).splitlines()
             selected_functions = []
             for function in self.functions:
-                if function not in available_functions:
-                    message = 'Function [{}] not available for profiling'.format(function)
+                if function not in self.available_functions:
+                    message = 'Function [{}] not available for tracing/profiling'.format(function)
                     if self.strict:
                         raise TargetStableError(message)
                     self.target.logger.warning(message)
@@ -208,6 +205,14 @@ class FtraceCollector(TraceCollector):
         List of ftrace events supported by the target's kernel.
         """
         return self.target.read_value(self.available_events_file).splitlines()
+
+    @property
+    @memoized
+    def available_functions(self):
+        """
+        List of functions whose tracing/profiling is supported by the target's kernel.
+        """
+        return self.target.read_value(self.available_functions_file).splitlines()
 
     def reset(self):
         if self.buffer_size:
