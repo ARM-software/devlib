@@ -52,6 +52,7 @@ class DaqInstrument(Instrument):
         self.keep_raw = keep_raw
         self._need_reset = True
         self._raw_files = []
+        self.tempdir = None
         if DaqClient is None:
             raise HostError('Could not import "daqpower": {}'.format(import_error_mesg))
         if labels is None:
@@ -97,12 +98,12 @@ class DaqInstrument(Instrument):
         self._need_reset = True
 
     def get_data(self, outfile):  # pylint: disable=R0914
-        tempdir = tempfile.mkdtemp(prefix='daq-raw-')
-        self.daq_client.get_data(tempdir)
+        self.tempdir = tempfile.mkdtemp(prefix='daq-raw-')
+        self.daq_client.get_data(self.tempdir)
         raw_file_map = {}
-        for entry in os.listdir(tempdir):
+        for entry in os.listdir(self.tempdir):
             site = os.path.splitext(entry)[0]
-            path = os.path.join(tempdir, entry)
+            path = os.path.join(self.tempdir, entry)
             raw_file_map[site] = path
             self._raw_files.append(path)
 
@@ -118,7 +119,7 @@ class DaqInstrument(Instrument):
                     file_handles.append(fh)
                 except KeyError:
                     message = 'Could not get DAQ trace for {}; Obtained traces are in {}'
-                    raise HostError(message.format(site, tempdir))
+                    raise HostError(message.format(site, self.tempdir))
 
             # The first row is the headers
             channel_order = []
@@ -155,5 +156,5 @@ class DaqInstrument(Instrument):
     def teardown(self):
         self.daq_client.close()
         if not self.keep_raw:
-            if os.path.isdir(tempdir):
-                shutil.rmtree(tempdir)
+            if os.path.isdir(self.tempdir):
+                shutil.rmtree(self.tempdir)
