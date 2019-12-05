@@ -19,7 +19,8 @@ import time
 from past.builtins import basestring, zip
 
 from devlib.host import PACKAGE_BIN_DIRECTORY
-from devlib.collector import CollectorBase
+from devlib.collector import (CollectorBase, CollectorOutput,
+                              CollectorOutputEntry)
 from devlib.utils.misc import ensure_file_directory_exists as _f
 
 
@@ -95,6 +96,7 @@ class PerfCollector(CollectorBase):
         self.force_install = force_install
         self.labels = labels
         self.report_options = report_options
+        self.output_path = None
 
         # Validate parameters
         if isinstance(optionstring, list):
@@ -148,14 +150,24 @@ class PerfCollector(CollectorBase):
         self.target.killall('sleep', as_root=self.target.is_rooted)
         # NB: we hope that no other "important" sleep is on-going
 
-    # pylint: disable=arguments-differ
-    def get_trace(self, outdir):
+    def set_output(self, output_path):
+        self.output_path = output_path
+
+    def get_data(self):
+        if self.output_path is None:
+            raise RuntimeError("Output path was not set.")
+
+        output = CollectorOutput()
+
         for label in self.labels:
             if self.command == 'record':
-                self._wait_for_data_file_write(label, outdir)
-                self._pull_target_file_to_host(label, 'rpt', outdir)
+                self._wait_for_data_file_write(label, self.output_path)
+                path = self._pull_target_file_to_host(label, 'rpt', self.output_path)
+                output.append(CollectorOutputEntry(path, 'file'))
             else:
-                self._pull_target_file_to_host(label, 'out', outdir)
+                path = self._pull_target_file_to_host(label, 'out', self.output_path)
+                output.append(CollectorOutputEntry(path, 'file'))
+        return output
 
     def _deploy_perf(self):
         host_executable = os.path.join(PACKAGE_BIN_DIRECTORY,
@@ -198,13 +210,14 @@ class PerfCollector(CollectorBase):
                                                       outfile=self._get_target_file(label, 'data'))
         return command
 
-    def _pull_target_file_to_host(self, label, extension, outdir):
+    def _pull_target_file_to_host(self, label, extension, output_path):
         target_file = self._get_target_file(label, extension)
         host_relpath = os.path.basename(target_file)
-        host_file = _f(os.path.join(outdir, host_relpath))
+        host_file = _f(os.path.join(output_path, host_relpath))
         self.target.pull(target_file, host_file)
+        return host_file
 
-    def _wait_for_data_file_write(self, label, outdir):
+    def _wait_for_data_file_write(self, label, output_path):
         data_file_finished_writing = False
         max_tries = 80
         current_tries = 0
