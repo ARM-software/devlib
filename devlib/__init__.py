@@ -49,6 +49,7 @@ from devlib.collector.ftrace import FtraceCollector
 from devlib.collector.perf import PerfCollector
 from devlib.collector.serial_trace import SerialTraceCollector
 from devlib.collector.dmesg import DmesgCollector
+from devlib.collector.logcat import LogcatCollector
 
 from devlib.host import LocalConnection
 from devlib.utils.android import AdbConnection
