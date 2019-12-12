@@ -136,9 +136,6 @@ def get_cpu_name(implementer, part, variant):
 
 
 def preexec_function():
-    # Ignore the SIGINT signal by setting the handler to the standard
-    # signal handler SIG_IGN.
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
     # Change process group in case we have to kill the subprocess and all of
     # its children later.
     # TODO: this is Unix-specific; would be good to find an OS-agnostic way
@@ -167,13 +164,6 @@ def check_output(command, timeout=None, ignore=None, inputtext=None,
     if 'stdout' in kwargs:
         raise ValueError('stdout argument not allowed, it will be overridden.')
 
-    def callback(pid):
-        try:
-            check_output_logger.debug('{} timed out; sending SIGKILL'.format(pid))
-            os.killpg(pid, signal.SIGKILL)
-        except OSError:
-            pass  # process may have already terminated.
-
     with check_output_lock:
         stderr = subprocess.STDOUT if combined_output else subprocess.PIPE
         process = subprocess.Popen(command,
@@ -183,27 +173,24 @@ def check_output(command, timeout=None, ignore=None, inputtext=None,
                                    preexec_fn=preexec_function,
                                    **kwargs)
 
-    if timeout:
-        timer = threading.Timer(timeout, callback, [process.pid, ])
-        timer.start()
-
     try:
-        output, error = process.communicate(inputtext)
-        if sys.version_info[0] == 3:
-            # Currently errors=replace is needed as 0x8c throws an error
-            output = output.decode(sys.stdout.encoding or 'utf-8', "replace")
-            if error:
-                error = error.decode(sys.stderr.encoding or 'utf-8', "replace")
-    finally:
-        if timeout:
-            timer.cancel()
+        output, error = process.communicate(inputtext, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        timeout_expired = e
+    else:
+        timeout_expired = None
+
+    # Currently errors=replace is needed as 0x8c throws an error
+    output = output.decode(sys.stdout.encoding or 'utf-8', "replace")
+    if error:
+        error = error.decode(sys.stderr.encoding or 'utf-8', "replace")
+
+    if timeout_expired:
+        raise TimeoutError(command, output='\n'.join([output or '', error or '']))
 
     retcode = process.poll()
-    if retcode:
-        if retcode == -9:  # killed, assume due to timeout callback
-            raise TimeoutError(command, output='\n'.join([output or '', error or '']))
-        elif ignore != 'all' and retcode not in ignore:
-            raise subprocess.CalledProcessError(retcode, command, output='\n'.join([output or '', error or '']))
+    if retcode and ignore != 'all' and retcode not in ignore:
+        raise subprocess.CalledProcessError(retcode, command, output='\n'.join([output or '', error or '']))
     return output, error
 
 
