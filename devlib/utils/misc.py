@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from functools import partial, reduce
 from itertools import groupby
 from operator import itemgetter
+from weakref import WeakKeyDictionary, WeakSet
 
 import ctypes
 import functools
@@ -705,3 +706,120 @@ def batch_contextmanager(f, kwargs_list):
         for kwargs in kwargs_list:
             stack.enter_context(f(**kwargs))
         yield
+
+class tls_property:
+    """
+    Use it like `property` decorator, but the result will be memoized per
+    thread. When the owning thread dies, the values for that thread will be
+    destroyed.
+
+    In order to get the values, it's necessary to call the object
+    given by the property. This is necessary in order to be able to add methods
+    to that object, like :meth:`_BoundTLSProperty.get_all_values`.
+
+    Values can be set and deleted as well, which will be a thread-local set.
+    """
+
+    @property
+    def name(self):
+        return self.factory.__name__
+
+    def __init__(self, factory):
+        self.factory = factory
+        # Lock accesses to shared WeakKeyDictionary and WeakSet
+        self.lock = threading.Lock()
+
+    def __get__(self, instance, owner=None):
+        return _BoundTLSProperty(self, instance, owner)
+
+    def _get_value(self, instance, owner):
+        tls, values = self._get_tls(instance)
+        try:
+            return tls.value
+        except AttributeError:
+            # Bind the method to `instance`
+            f = self.factory.__get__(instance, owner)
+            obj = f()
+            tls.value = obj
+            # Since that's a WeakSet, values will be removed automatically once
+            # the threading.local variable that holds them is destroyed
+            with self.lock:
+                values.add(obj)
+            return obj
+
+    def _get_all_values(self, instance, owner):
+        with self.lock:
+            # Grab a reference to all the objects at the time of the call by
+            # using a regular set
+            tls, values = self._get_tls(instance=instance)
+            return set(values)
+
+    def __set__(self, instance, value):
+        tls, values = self._get_tls(instance)
+        tls.value = value
+        with self.lock:
+            values.add(value)
+
+    def __delete__(self, instance):
+        tls, values = self._get_tls(instance)
+        with self.lock:
+            values.discard(tls.value)
+        del tls.value
+
+    def _get_tls(self, instance):
+        dct = instance.__dict__
+        name = self.name
+        try:
+            # Using instance.__dict__[self.name] is safe as
+            # getattr(instance, name) will return the property instead, as
+            # the property is a descriptor
+            tls = dct[name]
+        except KeyError:
+            with self.lock:
+                # Double check after taking the lock to avoid a race
+                if name not in dct:
+                    tls = (threading.local(), WeakSet())
+                    dct[name] = tls
+
+        return tls
+
+    @property
+    def basic_property(self):
+        """
+        Return a basic property that can be used to access the TLS value
+        without having to call it first.
+
+        The drawback is that it's not possible to do anything over than
+        getting/setting/deleting.
+        """
+        def getter(instance, owner=None):
+            prop = self.__get__(instance, owner)
+            return prop()
+
+        return property(getter, self.__set__, self.__delete__)
+
+class _BoundTLSProperty:
+    """
+    Simple proxy object to allow either calling it to get the TLS value, or get
+    some other informations by calling methods.
+    """
+    def __init__(self, tls_property, instance, owner):
+        self.tls_property = tls_property
+        self.instance = instance
+        self.owner = owner
+
+    def __call__(self):
+        return self.tls_property._get_value(
+            instance=self.instance,
+            owner=self.owner,
+        )
+
+    def get_all_values(self):
+        """
+        Returns all the thread-local values currently in use in the process for
+        that property for that instance.
+        """
+        return self.tls_property._get_all_values(
+            instance=self.instance,
+            owner=self.owner,
+        )
