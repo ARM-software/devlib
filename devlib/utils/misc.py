@@ -46,6 +46,11 @@ try:
 except AttributeError:
     from contextlib2 import ExitStack
 
+try:
+    from shlex import quote
+except ImportError:
+    from pipes import quote
+
 from past.builtins import basestring
 
 # pylint: disable=redefined-builtin
@@ -232,6 +237,32 @@ def walk_modules(path):
             mods.append(submod)
     return mods
 
+def redirect_streams(stdout, stderr, command):
+    """
+    Update a command to redirect a given stream to /dev/null if it's
+    ``subprocess.DEVNULL``.
+
+    :return: A tuple (stdout, stderr, command) with stream set to ``subprocess.PIPE``
+        if the `stream` parameter was set to ``subprocess.DEVNULL``.
+    """
+    def redirect(stream, redirection):
+        if stream == subprocess.DEVNULL:
+            suffix = '{}/dev/null'.format(redirection)
+        elif stream == subprocess.STDOUT:
+            suffix = '{}&1'.format(redirection)
+            # Indicate that there is nothing to monitor for stderr anymore
+            # since it's merged into stdout
+            stream = subprocess.DEVNULL
+        else:
+            suffix = ''
+
+        return (stream, suffix)
+
+    stdout, suffix1 = redirect(stdout, '>')
+    stderr, suffix2 = redirect(stderr, '2>')
+
+    command = 'sh -c {} {} {}'.format(quote(command), suffix1, suffix2)
+    return (stdout, stderr, command)
 
 def ensure_directory_exists(dirpath):
     """A filter for directory paths to ensure they exist."""
