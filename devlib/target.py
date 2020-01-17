@@ -292,6 +292,7 @@ class Target(object):
         self.conn = self.get_connection(timeout=timeout)
         if check_boot_completed:
             self.wait_boot_complete(timeout)
+        self.check_connection()
         self._resolve_paths()
         self.execute('mkdir -p {}'.format(quote(self.working_directory)))
         self.execute('mkdir -p {}'.format(quote(self.executables_directory)))
@@ -300,6 +301,14 @@ class Target(object):
         self._update_modules('connected')
         if self.platform.big_core and self.load_default_modules:
             self._install_module(get_module('bl'))
+
+    def check_connection(self):
+        """
+        Check that the connection works without obvious issues.
+        """
+        out = self.execute('true', as_root=False)
+        if out.strip():
+            raise TargetStableError('The shell seems to not be functional and adds content to stderr: {}'.format(out))
 
     def disconnect(self):
         connections = self._conn.get_all_values()
