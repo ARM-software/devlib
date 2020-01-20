@@ -167,14 +167,18 @@ class Target(object):
     @property
     @memoized
     def number_of_nodes(self):
-        num_nodes = 0
-        nodere = re.compile(r'^\./node\d+\s*$')
         cmd = 'cd /sys/devices/system/node && {busybox} find . -maxdepth 1'.format(busybox=quote(self.busybox))
-        output = self.execute(cmd, as_root=self.is_rooted)
-        for entry in output.splitlines():
-            if nodere.match(entry):
-                num_nodes += 1
-        return num_nodes
+        try:
+            output = self.execute(cmd, as_root=self.is_rooted)
+        except TargetStableError:
+            return 1
+        else:
+            nodere = re.compile(r'^\./node\d+\s*$')
+            num_nodes = 0
+            for entry in output.splitlines():
+                if nodere.match(entry):
+                    num_nodes += 1
+            return num_nodes
 
     @property
     @memoized
