@@ -22,6 +22,7 @@ from distutils.dir_util import copy_tree
 from getpass import getpass
 from pipes import quote
 
+from devlib.connection import ConnectionBase
 from devlib.exception import TargetTransientError, TargetStableError
 from devlib.utils.misc import check_output
 
@@ -37,7 +38,7 @@ def kill_children(pid, signal=signal.SIGKILL):
             os.kill(cpid, signal)
 
 
-class LocalConnection(object):
+class LocalConnection(ConnectionBase):
 
     name = 'local'
     host = 'localhost'
@@ -56,6 +57,7 @@ class LocalConnection(object):
     # pylint: disable=unused-argument
     def __init__(self, platform=None, keep_password=True, unrooted=False,
                  password=None, timeout=None):
+        super(LocalConnection, self).__init__()
         self._connected_as_root = None
         self.logger = logging.getLogger('local_connection')
         self.keep_password = keep_password

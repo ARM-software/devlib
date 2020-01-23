@@ -15,9 +15,8 @@ to be used target is also specified on instantiation by `conn_cls` parameter,
 though all concrete :class:`Target` implementations will set an appropriate
 default, so there is typically no need to specify this explicitly.
 
-:class:`Connection` classes are not a part of an inheritance hierarchy, i.e.
-they do not derive from a common base. Instead, a :class:`Connection` is any
-class that implements the following methods.
+:class:`Connection` classes derive from
+:class:`devlib.conneciton.ConnectionBase` and implement the following methods.
 
 
 .. method:: push(self, source, dest, timeout=None)
@@ -249,3 +248,35 @@ The only methods discussed below are those that will be overwritten by the
 .. method:: _wait_for_boot(self)
 
     Wait for the gem5 simulated system to have booted and finished the booting animation.
+
+
+.. _multiple-connections:
+
+Multipe Connections With One Target
+-----------------------------------
+
+.. note:: Multiple parallel connections to the same target are currently not possible
+	  with ``Gem5Connection``.
+
+A ``Target`` will automatically maintain one connection per active thread and
+will seemlessly switch between them, so that target commands being executed from
+parallel threads won't block each other.
+
+It is also possible to create additional connection objects within the same
+thread. You can then use these connections as context managers to execute
+target commands using them rather than the default conection for the thread:
+
+```
+conn = target.get_connection()
+with conn:
+    target.execute('ls')  # uses conn rather than the default connection.
+```
+
+If the connection object is being used within another function, you do not need
+to pass the target into that function as well, as the target will be returned on
+entering the connection's context:
+
+```
+with conn as target:
+   target.execute('ls')
+```

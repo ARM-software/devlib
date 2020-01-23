@@ -36,6 +36,7 @@ try:
 except ImportError:
     from pipes import quote
 
+from devlib.connection import ConnectionBase
 from devlib.exception import TargetTransientError, TargetStableError, HostError
 from devlib.utils.misc import check_output, which, ABI_MAP
 
@@ -233,7 +234,7 @@ class ApkInfo(object):
         return output
 
 
-class AdbConnection(object):
+class AdbConnection(ConnectionBase):
 
     # maintains the count of parallel active connections to a device, so that
     # adb disconnect is not invoked untill all connections are closed
@@ -263,6 +264,7 @@ class AdbConnection(object):
     # pylint: disable=unused-argument
     def __init__(self, device=None, timeout=None, platform=None, adb_server=None,
                  adb_as_root=False):
+        super(AdbConnection, self).__init__()
         self.timeout = timeout if timeout is not None else self.default_timeout
         if device is None:
             device = adb_get_device(timeout=timeout, adb_server=adb_server)

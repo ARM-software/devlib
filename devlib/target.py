@@ -311,7 +311,9 @@ class Target(object):
     def get_connection(self, timeout=None):
         if self.conn_cls is None:
             raise ValueError('Connection class not specified on Target creation.')
-        return self.conn_cls(timeout=timeout, **self.connection_settings)  # pylint: disable=not-callable
+        conn = self.conn_cls(timeout=timeout, **self.connection_settings)  # pylint: disable=not-callable
+        conn.target = self
+        return conn
 
     def set_connection(self, conn):
         tid = id(threading.current_thread())

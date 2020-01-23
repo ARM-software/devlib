@@ -182,7 +182,8 @@ Target
              thread, so you don't normally need to use this explicitly in
              threaded code. This is generally useful if you want to perform a
              blocking operation (e.g. using ``background()``) while at the same
-             time doing something else in the same host-side thread.
+             time doing something else in the same host-side thread. See also
+             :ref:`multple-connections`.
 
 .. method:: Target.set_connection(conn)
 
