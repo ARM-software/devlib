@@ -313,6 +313,12 @@ class Target(object):
             raise ValueError('Connection class not specified on Target creation.')
         return self.conn_cls(timeout=timeout, **self.connection_settings)  # pylint: disable=not-callable
 
+    def set_connection(self, conn):
+        tid = id(threading.current_thread())
+        old_conn = self._connections.get(tid)
+        self._connections[tid] = conn
+        return old_conn
+
     def wait_boot_complete(self, timeout=10):
         raise NotImplementedError()
 

@@ -184,6 +184,13 @@ Target
              blocking operation (e.g. using ``background()``) while at the same
              time doing something else in the same host-side thread.
 
+.. method:: Target.set_connection(conn)
+
+   Set the Target's connection for the current thread to the one specified
+   (typically, one that has previously been returned by the call to
+   ``get_connection``). Returns the old connection to the current thread -- it
+   is up to the caller to keep track of it and restore it if they wish.
+
 .. method:: Target.setup([executables])
 
    This will perform an initial one-time set up of a device for devlib
