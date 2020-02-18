@@ -93,6 +93,7 @@ android_home = None
 platform_tools = None
 adb = None
 aapt = None
+aapt_version = None
 fastboot = None
 
 
@@ -639,6 +640,7 @@ class _AndroidEnvironment(object):
         self.platform_tools = None
         self.adb = None
         self.aapt = None
+        self.aapt_version = None
         self.fastboot = None
 
 
@@ -665,6 +667,19 @@ def _initialize_without_android_home(env):
     return env
 
 
+def _discover_aapt(build_tools_directory):
+    versions = os.listdir(build_tools_directory)
+    for version in reversed(sorted(versions)):
+        for binary, aapt_version in [('aapt2', 2), ('aapt', 1)]:
+            aapt_path = os.path.join(build_tools_directory, version, binary)
+            if os.path.isfile(aapt_path):
+                logger.debug('Using {} for version {}'.format(binary, version))
+                return aapt_path, aapt_version
+    else:
+        raise HostError('aapt not found. Please make sure at least one Android '
+                        'platform is installed.')
+
+
 def _init_common(env):
     logger.debug('ANDROID_HOME: {}'.format(env.android_home))
     build_tools_directory = os.path.join(env.android_home, 'build-tools')
@@ -672,20 +687,11 @@ def _init_common(env):
         msg = '''ANDROID_HOME ({}) does not appear to have valid Android SDK install
                  (cannot find build-tools)'''
         raise HostError(msg.format(env.android_home))
-    versions = os.listdir(build_tools_directory)
-    for version in reversed(sorted(versions)):
-        aapt_path = os.path.join(build_tools_directory, version, 'aapt')
-        if os.path.isfile(aapt_path):
-            logger.debug('Using aapt for version {}'.format(version))
-            env.aapt = aapt_path
-            break
-    else:
-        raise HostError('aapt not found. Please make sure at least one Android '
-                        'platform is installed.')
+    env.aapt, env.aapt_version = _discover_aapt(build_tools_directory)
 
 
 def _check_env():
-    global android_home, platform_tools, adb, aapt  # pylint: disable=W0603
+    global android_home, platform_tools, adb, aapt, aapt_version  # pylint: disable=W0603
     if not android_home:
         android_home = os.getenv('ANDROID_HOME')
         if android_home:
@@ -696,6 +702,7 @@ def _check_env():
         platform_tools = _env.platform_tools
         adb = _env.adb
         aapt = _env.aapt
+        aapt_version = _env.aapt_version
 
 class LogcatMonitor(object):
     """
