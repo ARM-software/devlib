@@ -551,7 +551,7 @@ def adb_background_shell(device, command,
     logger.debug(full_command)
     return subprocess.Popen(full_command, stdout=stdout, stderr=stderr, shell=True)
 
-def adb_kill_server(self, timeout=30, adb_server=None):
+def adb_kill_server(timeout=30, adb_server=None):
     adb_command(None, 'kill-server', timeout, adb_server)
 
 def adb_list_devices(adb_server=None):
