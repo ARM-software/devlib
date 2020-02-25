@@ -16,7 +16,7 @@
 import os
 import shutil
 import tempfile
-from itertools import chain
+from itertools import chain, zip_longest
 
 from devlib.instrument import Instrument, MeasurementsCsv, CONTINUOUS
 from devlib.exception import HostError
@@ -127,23 +127,18 @@ class DaqInstrument(Instrument):
                 channel_order.extend(['{}_{}'.format(site, kind)
                                       for kind in next(reader)])
 
-            def _read_next_rows():
-                parts = []
-                for reader in site_readers.values():
-                    try:
-                        parts.extend(next(reader))
-                    except StopIteration:
-                        parts.extend([None, None])
-                return list(chain(parts))
+            def _read_rows():
+                row_iter = zip_longest(*site_readers.values(), fillvalue=(None, None))
+                for raw_row in row_iter:
+                    raw_row = list(chain.from_iterable(raw_row))
+                    yield raw_row
 
             with csvwriter(outfile) as writer:
                 field_names = [c.label for c in self.active_channels]
                 writer.writerow(field_names)
-                raw_row = _read_next_rows()
-                while any(raw_row):
+                for raw_row in _read_rows():
                     row = [raw_row[channel_order.index(f)] for f in field_names]
                     writer.writerow(row)
-                    raw_row = _read_next_rows()
 
             return MeasurementsCsv(outfile, self.active_channels, self.sample_rate_hz)
         finally:
