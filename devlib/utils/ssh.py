@@ -39,6 +39,7 @@ else:
 from pexpect import EOF, TIMEOUT, spawn
 
 # pylint: disable=redefined-builtin,wrong-import-position
+from devlib.connection import ConnectionBase
 from devlib.exception import (HostError, TargetStableError, TargetNotRespondingError,
                               TimeoutError, TargetTransientError)
 from devlib.utils.misc import (which, strip_bash_colors, check_output,
@@ -157,7 +158,7 @@ def check_keyfile(keyfile):
         return keyfile
 
 
-class SshConnection(object):
+class SshConnection(ConnectionBase):
 
     default_password_prompt = '[sudo] password'
     max_cancel_attempts = 5
@@ -194,6 +195,7 @@ class SshConnection(object):
                  sudo_cmd="sudo -- sh -c {}",
                  options=None
                  ):
+        super(SshConnection, self).__init__()
         self._connected_as_root = None
         self.host = host
         self.username = username
@@ -399,6 +401,7 @@ class TelnetConnection(SshConnection):
                  password_prompt=None,
                  original_prompt=None,
                  platform=None):
+        ConnectionBase.__init__(self)
         self.host = host
         self.username = username
         self.password = password

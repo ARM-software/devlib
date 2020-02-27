@@ -182,7 +182,15 @@ Target
              thread, so you don't normally need to use this explicitly in
              threaded code. This is generally useful if you want to perform a
              blocking operation (e.g. using ``background()``) while at the same
-             time doing something else in the same host-side thread.
+             time doing something else in the same host-side thread. See also
+             :ref:`multple-connections`.
+
+.. method:: Target.set_connection(conn)
+
+   Set the Target's connection for the current thread to the one specified
+   (typically, one that has previously been returned by the call to
+   ``get_connection``). Returns the old connection to the current thread -- it
+   is up to the caller to keep track of it and restore it if they wish.
 
 .. method:: Target.setup([executables])
 
