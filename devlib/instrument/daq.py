@@ -156,5 +156,5 @@ class DaqInstrument(Instrument):
     def teardown(self):
         self.daq_client.close()
         if not self.keep_raw:
-            if os.path.isdir(self.tempdir):
+            if self.tempdir and os.path.isdir(self.tempdir):
                 shutil.rmtree(self.tempdir)
