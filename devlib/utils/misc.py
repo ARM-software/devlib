@@ -155,8 +155,7 @@ check_output_logger = logging.getLogger('check_output')
 check_output_lock = threading.Lock()
 
 
-def check_output(command, timeout=None, ignore=None, inputtext=None,
-                 combined_output=False, **kwargs):
+def check_output(command, timeout=None, ignore=None, inputtext=None, **kwargs):
     """This is a version of subprocess.check_output that adds a timeout parameter to kill
     the subprocess if it does not return within the specified time."""
     # pylint: disable=too-many-branches
@@ -171,10 +170,9 @@ def check_output(command, timeout=None, ignore=None, inputtext=None,
         raise ValueError('stdout argument not allowed, it will be overridden.')
 
     with check_output_lock:
-        stderr = subprocess.STDOUT if combined_output else subprocess.PIPE
         process = subprocess.Popen(command,
                                    stdout=subprocess.PIPE,
-                                   stderr=stderr,
+                                   stderr=subprocess.PIPE,
                                    stdin=subprocess.PIPE,
                                    preexec_fn=preexec_function,
                                    **kwargs)
@@ -188,8 +186,7 @@ def check_output(command, timeout=None, ignore=None, inputtext=None,
 
     # Currently errors=replace is needed as 0x8c throws an error
     output = output.decode(sys.stdout.encoding or 'utf-8', "replace")
-    if error:
-        error = error.decode(sys.stderr.encoding or 'utf-8', "replace")
+    error = error.decode(sys.stderr.encoding or 'utf-8', "replace")
 
     if timeout_expired:
         raise TimeoutError(command, output='\n'.join([output or '', error or '']))
