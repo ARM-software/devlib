@@ -177,6 +177,8 @@ def check_output(command, timeout=None, ignore=None, inputtext=None, **kwargs):
                                    preexec_fn=preexec_function,
                                    **kwargs)
 
+    output = None
+    error = None
     try:
         output, error = process.communicate(inputtext, timeout=timeout)
     except subprocess.TimeoutExpired as e:
