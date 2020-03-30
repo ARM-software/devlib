@@ -185,15 +185,15 @@ def check_output(command, timeout=None, ignore=None, inputtext=None, **kwargs):
         timeout_expired = None
 
     # Currently errors=replace is needed as 0x8c throws an error
-    output = output.decode(sys.stdout.encoding or 'utf-8', "replace")
-    error = error.decode(sys.stderr.encoding or 'utf-8', "replace")
+    output = output.decode(sys.stdout.encoding or 'utf-8', "replace") if output else ''
+    error = error.decode(sys.stderr.encoding or 'utf-8', "replace") if output else ''
 
     if timeout_expired:
-        raise TimeoutError(command, output='\n'.join([output or '', error or '']))
+        raise TimeoutError(command, output='\n'.join([output, error]))
 
     retcode = process.poll()
     if retcode and ignore != 'all' and retcode not in ignore:
-        raise subprocess.CalledProcessError(retcode, command, output='\n'.join([output or '', error or '']))
+        raise subprocess.CalledProcessError(retcode, command, output='\n'.join([output, error]))
     return output, error
 
 
