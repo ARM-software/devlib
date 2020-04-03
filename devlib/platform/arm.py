@@ -108,7 +108,7 @@ class VersatileExpressPlatform(Platform):
                                     init_dtr=0) as tty:
             tty.sendline('su')  # this is, apprently, required to query network device
                                 # info by name on recent Juno builds...
-            self.logger.debug('Waiting for the Android shell prompt.')
+            self.logger.debug('Waiting for the shell prompt.')
             tty.expect(target.shell_prompt)
 
             self.logger.debug('Waiting for IP address...')
