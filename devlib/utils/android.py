@@ -753,7 +753,7 @@ class LogcatMonitor(object):
         logcat_cmd = get_adb_command(self.target.conn.device, logcat_cmd)
 
         logger.debug('logcat command ="{}"'.format(logcat_cmd))
-        self._logcat = pexpect.spawn(logcat_cmd, logfile=self._logfile)
+        self._logcat = pexpect.spawn(logcat_cmd, logfile=self._logfile, encoding='utf-8')
 
     def stop(self):
         self._logcat.terminate()
