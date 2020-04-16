@@ -714,11 +714,12 @@ class LogcatMonitor(object):
     def logfile(self):
         return self._logfile
 
-    def __init__(self, target, regexps=None):
+    def __init__(self, target, regexps=None, logcat_format=None):
         super(LogcatMonitor, self).__init__()
 
         self.target = target
         self._regexps = regexps
+        self._logcat_format = logcat_format
         self._logcat = None
         self._logfile = None
 
@@ -749,6 +750,9 @@ class LogcatMonitor(object):
                 logcat_cmd = '{} -e {}'.format(logcat_cmd, quote(regexp))
             else:
                 logcat_cmd = '{} | grep {}'.format(logcat_cmd, quote(regexp))
+
+        if self._logcat_format:
+            logcat_cmd = "{} -v {}".format(logcat_cmd, quote(self._logcat_format))
 
         logcat_cmd = get_adb_command(self.target.conn.device, logcat_cmd)
 
