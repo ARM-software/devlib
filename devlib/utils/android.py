@@ -756,6 +756,7 @@ class LogcatMonitor(object):
         self._logcat = pexpect.spawn(logcat_cmd, logfile=self._logfile, encoding='utf-8')
 
     def stop(self):
+        self.flush_log()
         self._logcat.terminate()
         self._logfile.close()
 
@@ -763,6 +764,12 @@ class LogcatMonitor(object):
         """
         Return the list of lines found by the monitor
         """
+        self.flush_log()
+
+        with open(self._logfile.name) as fh:
+            return [line for line in fh]
+
+    def flush_log(self):
         # Unless we tell pexect to 'expect' something, it won't read from
         # logcat's buffer or write into our logfile. We'll need to force it to
         # read any pending logcat output.
@@ -792,9 +799,6 @@ class LogcatMonitor(object):
                 # No available bytes to read. No prob, logcat just hasn't
                 # printed anything since pexpect last read from its buffer.
                 break
-
-        with open(self._logfile.name) as fh:
-            return [line for line in fh]
 
     def clear_log(self):
         with open(self._logfile.name, 'w') as _:
