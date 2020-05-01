@@ -1153,7 +1153,11 @@ class AndroidTarget(Target):
 
     @property
     def adb_name(self):
-        return self.conn.device
+        return getattr(self.conn, 'device', None)
+
+    @property
+    def adb_server(self):
+        return getattr(self.conn, 'adb_server', None)
 
     @property
     @memoized
@@ -1444,7 +1448,8 @@ class AndroidTarget(Target):
                 flags.append('-g')  # Grant all runtime permissions
             self.logger.debug("Replace APK = {}, ADB flags = '{}'".format(replace, ' '.join(flags)))
             if isinstance(self.conn, AdbConnection):
-                return adb_command(self.adb_name, "install {} {}".format(' '.join(flags), quote(filepath)), timeout=timeout)
+                return adb_command(self.adb_name, "install {} {}".format(' '.join(flags), quote(filepath)),
+                                   timeout=timeout, adb_server=self.adb_server)
             else:
                 dev_path = self.get_workpath(filepath.rsplit(os.path.sep, 1)[-1])
                 self.push(quote(filepath), dev_path, timeout=timeout)
@@ -1513,7 +1518,8 @@ class AndroidTarget(Target):
 
     def uninstall_package(self, package):
         if isinstance(self.conn, AdbConnection):
-            adb_command(self.adb_name, "uninstall {}".format(quote(package)), timeout=30)
+            adb_command(self.adb_name, "uninstall {}".format(quote(package)), timeout=30,
+                        adb_server=self.adb_server)
         else:
             self.execute("pm uninstall {}".format(quote(package)), timeout=30)
 
@@ -1530,7 +1536,7 @@ class AndroidTarget(Target):
         logcat_opts = '-d' + formatstr + filtstr
         if isinstance(self.conn, AdbConnection):
             command = 'logcat {} {} {}'.format(logcat_opts, op, quote(filepath))
-            adb_command(self.adb_name, command, timeout=timeout)
+            adb_command(self.adb_name, command, timeout=timeout, adb_server=self.adb_server)
         else:
             dev_path = self.get_workpath('logcat')
             command = 'logcat {} {} {}'.format(logcat_opts, op, quote(dev_path))
@@ -1541,7 +1547,7 @@ class AndroidTarget(Target):
     def clear_logcat(self):
         with self.clear_logcat_lock:
             if isinstance(self.conn, AdbConnection):
-                adb_command(self.adb_name, 'logcat -c', timeout=30)
+                adb_command(self.adb_name, 'logcat -c', timeout=30, adb_server=self.adb_server)
             else:
                 self.execute('logcat -c', timeout=30)
 
