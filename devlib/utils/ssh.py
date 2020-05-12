@@ -351,7 +351,7 @@ class SshConnection(SshConnectionBase):
         else:
             policy = AutoAddPolicy
         # Only try using SSH keys if we're not using a password
-        check_ssh_keys = not self.password
+        check_ssh_keys = self.password is None
 
         with _handle_paramiko_exceptions():
             client = SSHClient()
