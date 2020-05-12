@@ -135,6 +135,9 @@ Connection Types
     :param username: username for SSH login
     :param password: password for the SSH connection
 
+                     .. note:: To connect to a system without a password this
+                               parameter should be set to an empty string otherwise
+                               ssh key authentication will be attempted.
                      .. note:: In order to user password-based authentication,
                                ``sshpass`` utility must be installed on the
                                system.
