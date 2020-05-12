@@ -264,7 +264,7 @@ class AdbConnection(ConnectionBase):
 
     # pylint: disable=unused-argument
     def __init__(self, device=None, timeout=None, platform=None, adb_server=None,
-                 adb_as_root=False):
+                 adb_as_root=False, connection_attempts=MAX_ATTEMPTS):
         super().__init__()
         self.timeout = timeout if timeout is not None else self.default_timeout
         if device is None:
@@ -274,7 +274,7 @@ class AdbConnection(ConnectionBase):
         self.adb_as_root = adb_as_root
         if self.adb_as_root:
             self.adb_root(enable=True)
-        adb_connect(self.device, adb_server=self.adb_server)
+        adb_connect(self.device, adb_server=self.adb_server, attempts=connection_attempts)
         AdbConnection.active_connections[self.device] += 1
         self._setup_ls()
         self._setup_su()
