@@ -486,6 +486,7 @@ class SshConnection(SshConnectionBase):
 
     @classmethod
     def _push_path(cls, sftp, src, dst):
+        logger.debug('Pushing via sftp: {} -> {}'.format(src,dst))
         push = cls._push_folder if os.path.isdir(src) else cls._push_file
         push(sftp, src, dst)
 
@@ -525,6 +526,7 @@ class SshConnection(SshConnectionBase):
 
     @classmethod
     def _pull_path(cls, sftp, src, dst):
+        logger.debug('Pulling via sftp: {} -> {}'.format(src,dst))
         try:
             cls._pull_file(sftp, src, dst)
         except IOError:
