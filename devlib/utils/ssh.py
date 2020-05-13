@@ -359,6 +359,7 @@ class SshConnection(SshConnectionBase):
                  platform=None,
                  sudo_cmd="sudo -S -- sh -c {}",
                  strict_host_check=True,
+                 use_scp=False
                  ):
 
         super().__init__(
@@ -372,6 +373,15 @@ class SshConnection(SshConnectionBase):
             strict_host_check=strict_host_check,
         )
         self.timeout = timeout if timeout is not None else self.default_timeout
+
+        # Allow using scp for file transfer if sftp is not supported
+        self.use_scp = use_scp
+        if self.use_scp:
+            logger.debug('Using SCP for file transfer')
+            _check_env()
+            self.options = self._get_default_options()
+        else:
+            logger.debug('Using SFTP for file transfer')
 
         self.client = self._make_client()
         atexit.register(self.close)
@@ -522,12 +532,20 @@ class SshConnection(SshConnectionBase):
             cls._pull_folder(sftp, src, dst)
 
     def push(self, source, dest, timeout=30):
-        with _handle_paramiko_exceptions(), self._get_sftp(timeout) as sftp:
-            self._push_path(sftp, source, dest)
+        # If using scp, use implementation from base class
+        if self.use_scp:
+            super().push(source, dest, timeout)
+        else:
+            with _handle_paramiko_exceptions(), self._get_sftp(timeout) as sftp:
+                self._push_path(sftp, source, dest)
 
     def pull(self, source, dest, timeout=30):
-        with _handle_paramiko_exceptions(), self._get_sftp(timeout) as sftp:
-            self._pull_path(sftp, source, dest)
+        # If using scp, use implementation from base class
+        if self.use_scp:
+            super().pull(source, dest, timeout)
+        else:
+            with _handle_paramiko_exceptions(), self._get_sftp(timeout) as sftp:
+                self._pull_path(sftp, source, dest)
 
     def execute(self, command, timeout=None, check_exit_code=True,
                 as_root=False, strip_colors=True, will_succeed=False): #pylint: disable=unused-argument
