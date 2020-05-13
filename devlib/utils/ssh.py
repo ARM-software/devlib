@@ -393,7 +393,7 @@ class SshConnection(SshConnectionBase):
         # needed, it will explode when someone tries to use it. After all, the
         # user might not be interested in being root at all.
         self._sudo_needs_password = (
-            'NEED_PASSOWRD' in
+            'NEED_PASSWORD' in
             self.execute(
                 # sudo -n is broken on some versions on MacOSX, revisit that if
                 # someone ever cares
