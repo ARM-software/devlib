@@ -2234,7 +2234,8 @@ class ChromeOsTarget(LinuxTarget):
 
         # Pull out ssh connection settings
         ssh_conn_params = ['host', 'username', 'password', 'keyfile',
-                           'port', 'password_prompt', 'timeout', 'sudo_cmd']
+                           'port', 'timeout', 'sudo_cmd',
+                           'strict_host_check', 'use_scp']
         self.ssh_connection_settings = {}
         for setting in ssh_conn_params:
             if connection_settings.get(setting, None):
