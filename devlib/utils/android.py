@@ -637,6 +637,7 @@ class _AndroidEnvironment(object):
     def __init__(self):
         self.android_home = None
         self.platform_tools = None
+        self.build_tools = None
         self.adb = None
         self.aapt = None
         self.fastboot = None
@@ -664,25 +665,35 @@ def _initialize_without_android_home(env):
     _init_common(env)
     return env
 
-
 def _init_common(env):
+    _discover_build_tools(env)
+    _discover_aapt(env)
+
+def _discover_build_tools(env):
     logger.debug('ANDROID_HOME: {}'.format(env.android_home))
     build_tools_directory = os.path.join(env.android_home, 'build-tools')
     if not os.path.isdir(build_tools_directory):
         msg = '''ANDROID_HOME ({}) does not appear to have valid Android SDK install
                  (cannot find build-tools)'''
         raise HostError(msg.format(env.android_home))
-    versions = os.listdir(build_tools_directory)
-    for version in reversed(sorted(versions)):
-        aapt_path = os.path.join(build_tools_directory, version, 'aapt')
-        if os.path.isfile(aapt_path):
-            logger.debug('Using aapt for version {}'.format(version))
-            env.aapt = aapt_path
-            break
-    else:
-        raise HostError('aapt not found. Please make sure at least one Android '
-                        'platform is installed.')
+    env.build_tools = build_tools_directory
 
+def _discover_aapt(env):
+    if env.build_tools:
+        versions = os.listdir(env.build_tools)
+        for version in reversed(sorted(versions)):
+            aapt_path = os.path.join(env.build_tools, version, 'aapt')
+            if os.path.isfile(aapt_path):
+                logger.debug('Using aapt for version {}'.format(version))
+                env.aapt = aapt_path
+                break
+
+    if not env.aapt:
+        env.aapt = which(aapt)
+
+    if not env.aapt:
+        raise HostError('aapt not found. Please make sure it is avaliable in PATH'
+                        ' or at least one Android platform is installed')
 
 def _check_env():
     global android_home, platform_tools, adb, aapt  # pylint: disable=W0603
