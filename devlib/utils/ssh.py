@@ -444,7 +444,8 @@ class SshConnection(SshConnectionBase):
         try:
             sftp.put(src, dst)
         # Maybe the dst was a folder
-        except OSError:
+        except OSError as e:
+            logger.debug('sftp transfer error: {}'.format(repr(e)))
             # This might fail if the folder already exists
             with contextlib.suppress(IOError):
                 sftp.mkdir(dst)
@@ -453,8 +454,8 @@ class SshConnection(SshConnectionBase):
                 dst,
                 os.path.basename(src),
             )
-
-            return cls._push_file(sftp, src, new_dst)
+            logger.debug('Trying: {} -> {}'.format(src, new_dst))
+            sftp.put(src, new_dst)
 
 
     @classmethod
