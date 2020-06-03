@@ -152,7 +152,11 @@ class ApkInfo(object):
         self.version_code = None
         self.native_code = None
         self.permissions = []
-        self.parse(path)
+        self._apk_path = None
+        self._activities = None
+        self._methods = None
+        if path:
+            self.parse(path)
 
     # pylint: disable=too-many-branches
     def parse(self, apk_path):
