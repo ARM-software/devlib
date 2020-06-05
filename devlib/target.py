@@ -58,7 +58,7 @@ from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_s
 
 
 FSTAB_ENTRY_REGEX = re.compile(r'(\S+) on (.+) type (\S+) \((\S+)\)')
-ANDROID_SCREEN_STATE_REGEX = re.compile('(?:mPowerState|mScreenOn|Display Power: state)=([0-9]+|true|false|ON|OFF)',
+ANDROID_SCREEN_STATE_REGEX = re.compile('(?:mPowerState|mScreenOn|Display Power: state)=([0-9]+|true|false|ON|OFF|DOZE)',
                                         re.IGNORECASE)
 ANDROID_SCREEN_RESOLUTION_REGEX = re.compile(r'cur=(?P<width>\d+)x(?P<height>\d+)')
 ANDROID_SCREEN_ROTATION_REGEX = re.compile(r'orientation=(?P<rotation>[0-3])')
@@ -1564,17 +1564,28 @@ class AndroidTarget(Target):
         output = self.execute('dumpsys power')
         match = ANDROID_SCREEN_STATE_REGEX.search(output)
         if match:
+            if 'DOZE' in match.group(1).upper():
+                return True
             return boolean(match.group(1))
         else:
             raise TargetStableError('Could not establish screen state.')
 
-    def ensure_screen_is_on(self):
+    def ensure_screen_is_on(self, verify=True):
         if not self.is_screen_on():
             self.execute('input keyevent 26')
+        if verify and not self.is_screen_on():
+             raise TargetStableError('Display cannot be turned on.')
 
-    def ensure_screen_is_off(self):
-        if self.is_screen_on():
-            self.execute('input keyevent 26')
+    def ensure_screen_is_off(self, verify=True):
+        # Allow 2 attempts to help with cases of ambient display modes
+        # where the first attempt will switch the display fully on.
+        for _ in range(2):
+            if self.is_screen_on():
+                self.execute('input keyevent 26')
+                time.sleep(0.5)
+        if verify and self.is_screen_on():
+             msg = 'Display cannot be turned off. Is always on display enabled?'
+             raise TargetStableError(msg)
 
     def set_auto_brightness(self, auto_brightness):
         cmd = 'settings put system screen_brightness_mode {}'
