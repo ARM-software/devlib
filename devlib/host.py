@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-from glob import iglob
+import glob
 import os
 import signal
 import shutil
@@ -64,17 +64,14 @@ class LocalConnection(ConnectionBase):
         self.unrooted = unrooted
         self.password = password
 
-    def push(self, source, dest, timeout=None, as_root=False):  # pylint: disable=unused-argument
-        self.logger.debug('cp {} {}'.format(source, dest))
-        shutil.copy(source, dest)
+    def push(self, sources, dest, timeout=None, as_root=False):  # pylint: disable=unused-argument
+        self.logger.debug('copying {} to {}'.format(sources, dest))
+        for source in sources:
+            shutil.copy(source, dest)
 
-    def pull(self, source, dest, timeout=None, as_root=False): # pylint: disable=unused-argument
-        self.logger.debug('cp {} {}'.format(source, dest))
-        if ('*' in source or '?' in source) and os.path.isdir(dest):
-            # Pull all files matching a wildcard expression
-            for each_source in iglob(source):
-                shutil.copy(each_source, dest)
-        else:
+    def pull(self, sources, dest, timeout=None, as_root=False): # pylint: disable=unused-argument
+        for source in sources:
+            self.logger.debug('copying {} to {}'.format(source, dest))
             if os.path.isdir(source):
                 # Use distutils to allow copying into an existing directory structure.
                 copy_tree(source, dest)
