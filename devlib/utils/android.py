@@ -19,6 +19,7 @@ Utility functions for working with Android devices through adb.
 
 """
 # pylint: disable=E1103
+import glob
 import os
 import re
 import sys
@@ -288,28 +289,24 @@ class AdbConnection(ConnectionBase):
         self._setup_ls()
         self._setup_su()
 
-    def push(self, source, dest, timeout=None):
+    def _push_pull(self, action, sources, dest, timeout):
         if timeout is None:
             timeout = self.timeout
-        command = "push {} {}".format(quote(source), quote(dest))
-        if not os.path.exists(source):
-            raise HostError('No such file "{}"'.format(source))
-        return adb_command(self.device, command, timeout=timeout, adb_server=self.adb_server)
 
-    def pull(self, source, dest, timeout=None):
-        if timeout is None:
-            timeout = self.timeout
-        # Pull all files matching a wildcard expression
-        if os.path.isdir(dest) and \
-           ('*' in source or '?' in source):
-            command = 'shell {} {}'.format(self.ls_command, source)
-            output = adb_command(self.device, command, timeout=timeout, adb_server=self.adb_server)
-            for line in output.splitlines():
-                command = "pull {} {}".format(quote(line.strip()), quote(dest))
-                adb_command(self.device, command, timeout=timeout, adb_server=self.adb_server)
-            return
-        command = "pull {} {}".format(quote(source), quote(dest))
-        return adb_command(self.device, command, timeout=timeout, adb_server=self.adb_server)
+        paths = sources + [dest]
+
+        # Quote twice to avoid expansion by host shell, then ADB globbing
+        do_quote = lambda x: quote(glob.escape(x))
+        paths = ' '.join(map(do_quote, paths))
+
+        command = "{} {}".format(action, paths)
+        adb_command(self.device, command, timeout=timeout, adb_server=self.adb_server)
+
+    def push(self, sources, dest, timeout=None):
+        return self._push_pull('push', sources, dest, timeout)
+
+    def pull(self, sources, dest, timeout=None):
+        return self._push_pull('pull', sources, dest, timeout)
 
     # pylint: disable=unused-argument
     def execute(self, command, timeout=None, check_exit_code=False,
