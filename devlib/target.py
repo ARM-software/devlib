@@ -56,7 +56,7 @@ from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor
 from devlib.utils.misc import memoized, isiterable, convert_new_lines
 from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
-from devlib.utils.misc import batch_contextmanager, tls_property
+from devlib.utils.misc import batch_contextmanager, tls_property, nullcontext
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string, bytes_regex
 
 
@@ -510,27 +510,28 @@ class Target(object):
         tmpfile = os.path.join(dest, tar_file_name)
 
         # If root is required, use tmp location for tar creation.
-        if as_root:
-            tar_file_name = self.path.join(self._file_transfer_cache, tar_file_name)
+        tar_file_cm = self._xfer_cache_path if as_root else nullcontext
 
         # Does the folder exist?
         self.execute('ls -la {}'.format(quote(source_dir)), as_root=as_root)
-        # Try compressing the folder
-        try:
-            self.execute('{} tar -cvf {} {}'.format(
-                quote(self.busybox), quote(tar_file_name), quote(source_dir)
-            ), as_root=as_root)
-        except TargetStableError:
-            self.logger.debug('Failed to run tar command on target! ' \
-                              'Not pulling directory {}'.format(source_dir))
-        # Pull the file
-        if not os.path.exists(dest):
-            os.mkdir(dest)
-        self.pull(tar_file_name, tmpfile)
-        # Decompress
-        f = tarfile.open(tmpfile, 'r')
-        f.extractall(outdir)
-        os.remove(tmpfile)
+
+        with tar_file_cm(tar_file_name) as tar_file_name:
+            # Try compressing the folder
+            try:
+                self.execute('{} tar -cvf {} {}'.format(
+                    quote(self.busybox), quote(tar_file_name), quote(source_dir)
+                ), as_root=as_root)
+            except TargetStableError:
+                self.logger.debug('Failed to run tar command on target! ' \
+                                'Not pulling directory {}'.format(source_dir))
+            # Pull the file
+            if not os.path.exists(dest):
+                os.mkdir(dest)
+            self.pull(tar_file_name, tmpfile)
+            # Decompress
+            with tarfile.open(tmpfile, 'r') as f:
+                f.extractall(outdir)
+            os.remove(tmpfile)
 
     # execution
 
