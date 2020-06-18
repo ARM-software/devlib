@@ -464,7 +464,7 @@ class SshConnection(SshConnectionBase):
         # inside the destination folder, rather than merging the trees.
         dst = os.path.join(
             dst,
-            os.path.basename(src),
+            os.path.basename(os.path.normpath(src)),
         )
         return cls._push_folder_internal(sftp, src, dst)
 
