@@ -628,7 +628,7 @@ class Target(object):
         raise IOError('No usable temporary filename found')
 
     def remove(self, path, as_root=False):
-        self.execute('rm -rf {}'.format(quote(path)), as_root=as_root)
+        self.execute('rm -rf -- {}'.format(quote(path)), as_root=as_root)
 
     # misc
     def core_cpus(self, core):
