@@ -585,6 +585,9 @@ class Target(object):
 
     # files
 
+    def makedirs(self, path):
+        self.execute('mkdir -p {}'.format(quote(folder)))
+
     def file_exists(self, filepath):
         command = 'if [ -e {} ]; then echo 1; else echo 0; fi'
         output = self.execute(command.format(quote(filepath)), as_root=self.is_rooted)
