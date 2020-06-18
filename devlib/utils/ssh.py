@@ -451,28 +451,45 @@ class SshConnection(SshConnectionBase):
         try:
             sftp.put(src, dst)
         # Maybe the dst was a folder
-        except OSError as e:
-            logger.debug('sftp transfer error: {}'.format(repr(e)))
-            # This might fail if the folder already exists
-            with contextlib.suppress(IOError):
-                sftp.mkdir(dst)
-
+        except OSError as orig_excep:
+            # If dst was an existing folder, we add the src basename to create
+            # a new destination for the file as cp would do
             new_dst = os.path.join(
                 dst,
                 os.path.basename(src),
             )
             logger.debug('Trying: {} -> {}'.format(src, new_dst))
-            sftp.put(src, new_dst)
+            try:
+                sftp.put(src, new_dst)
+            # This still failed, which either means:
+            # * There are some missing folders in the dirnames
+            # * Something else SFTP-related is wrong
+            except OSError as e:
+                # Raise the original exception, as it is closer to what the
+                # user asked in the first place
+                raise orig_excep
 
+    @classmethod
+    def _path_exists(cls, sftp, path):
+        try:
+            sftp.lstat(path)
+        except FileNotFoundError:
+            return False
+        else:
+            return True
 
     @classmethod
     def _push_folder(cls, sftp, src, dst):
         # Behave like the "mv" command or adb push: a new folder is created
-        # inside the destination folder, rather than merging the trees.
-        dst = os.path.join(
-            dst,
-            os.path.basename(os.path.normpath(src)),
-        )
+        # inside the destination folder, rather than merging the trees, but
+        # only if the destination already exists. Otherwise, it is use as-is as
+        # the new hierarchy name.
+        if cls._path_exists(sftp, dst):
+            dst = os.path.join(
+                dst,
+                os.path.basename(os.path.normpath(src)),
+            )
+
         return cls._push_folder_internal(sftp, src, dst)
 
     @classmethod
