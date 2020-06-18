@@ -436,6 +436,10 @@ Target
    Return a list of :class:`PsEntry` instances for all running processes on the
    system.
 
+.. method:: Target.makedirs(self, path)
+
+   Create a directory at the given path and all its ancestors if needed.
+
 .. method:: Target.file_exists(self, filepath)
 
    Returns ``True`` if the specified path exists on the target and ``False``
