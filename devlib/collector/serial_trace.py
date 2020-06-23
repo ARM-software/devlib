@@ -33,7 +33,7 @@ class SerialTraceCollector(CollectorBase):
         self.serial_port = serial_port
         self.baudrate = baudrate
         self.timeout = timeout
-        self.output_path - None
+        self.output_path = None
 
         self._serial_target = None
         self._conn = None
