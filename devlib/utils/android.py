@@ -574,7 +574,7 @@ def adb_background_shell(conn, command,
     uuid_var = 'BACKGROUND_COMMAND_UUID={}'.format(uuid_)
     command = "{} sh -c {}".format(uuid_var, quote(command))
 
-    adb_cmd = get_adb_command(None, 'shell', adb_server)
+    adb_cmd = get_adb_command(device, 'shell', adb_server)
     full_command = '{} {}'.format(adb_cmd, quote(command))
     logger.debug(full_command)
     p = subprocess.Popen(full_command, stdout=stdout, stderr=stderr, shell=True)
