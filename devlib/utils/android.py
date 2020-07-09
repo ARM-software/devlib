@@ -203,10 +203,10 @@ class ApkInfo(object):
     @property
     def activities(self):
         if self._activities is None:
-            file_flag = '--file' if aapt_version == 2 else ''
-            cmd = [aapt, 'dump', 'xmltree',
-                   self._apk_path, '{}'.format(file_flag),
-                   'AndroidManifest.xml']
+            cmd = [aapt, 'dump', 'xmltree', self._apk_path]
+            if aapt_version == 2:
+                cmd += ['--file']
+            cmd += ['AndroidManifest.xml']
             matched_activities = self.activity_regex.finditer(self._run(cmd))
             self._activities = [m.group('name') for m in matched_activities]
         return self._activities
