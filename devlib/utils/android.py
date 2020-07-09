@@ -214,12 +214,13 @@ class ApkInfo(object):
     @property
     def methods(self):
         if self._methods is None:
-            with zipfile.ZipFile(self._apk_path, 'r') as z:
-                extracted = z.extract('classes.dex', tempfile.gettempdir())
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with zipfile.ZipFile(self._apk_path, 'r') as z:
+                    extracted = z.extract('classes.dex', tmp_dir)
 
-            dexdump = os.path.join(os.path.dirname(aapt), 'dexdump')
-            command = [dexdump, '-l', 'xml', extracted]
-            dump = self._run(command)
+                dexdump = os.path.join(os.path.dirname(aapt), 'dexdump')
+                command = [dexdump, '-l', 'xml', extracted]
+                dump = self._run(command)
 
             xml_tree = xml.etree.ElementTree.fromstring(dump)
 
