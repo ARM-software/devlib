@@ -421,7 +421,7 @@ class Target(object):
                 if not dst_is_dir(dest):
                     raise dst_excep('A folder dest is required for multiple matches but destination is a file: {}'.format(dest))
             else:
-                dst_makedirs(dest)
+                dst_mkdir(dest)
 
 
     def push(self, source, dest, as_root=False, timeout=None, globbing=False):  # pylint: disable=arguments-differ
