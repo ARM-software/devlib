@@ -702,7 +702,7 @@ class Target(object):
     # files
 
     def makedirs(self, path):
-        self.execute('mkdir -p {}'.format(quote(folder)))
+        self.execute('mkdir -p {}'.format(quote(path)))
 
     def file_exists(self, filepath):
         command = 'if [ -e {} ]; then echo 1; else echo 0; fi'
