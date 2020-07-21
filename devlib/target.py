@@ -494,7 +494,7 @@ class Target(object):
             for source in sources:
                 with self._xfer_cache_path(source) as device_tempfile:
                     self.execute("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=True)
-                    self.execute("chmod 0644 -- {}".format(quote(device_tempfile)), as_root=True)
+                    self.execute("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=True)
                     do_pull([device_tempfile], dest)
         else:
             do_pull(sources, dest)
