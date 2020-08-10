@@ -203,11 +203,11 @@ class PopenBackgroundCommand(BackgroundCommand):
 
     def cancel(self, kill_timeout=_KILL_TIMEOUT):
         popen = self.popen
-        popen.send_signal(signal.SIGTERM)
+        os.killpg(os.getpgid(popen.pid), signal.SIGTERM)
         try:
             popen.wait(timeout=_KILL_TIMEOUT)
         except subprocess.TimeoutExpired:
-            popen.kill()
+            os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
 
     def close(self):
         self.popen.__exit__(None, None, None)
