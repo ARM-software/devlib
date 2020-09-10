@@ -36,6 +36,7 @@ from future.utils import raise_from
 
 from paramiko.client import SSHClient, AutoAddPolicy, RejectPolicy
 import paramiko.ssh_exception
+from scp import SCPClient
 # By default paramiko is very verbose, including at the INFO level
 logging.getLogger("paramiko").setLevel(logging.WARNING)
 
@@ -446,6 +447,10 @@ class SshConnection(SshConnectionBase):
         sftp.get_channel().settimeout(timeout)
         return sftp
 
+    
+    def _get_scp(self, timeout):
+        return SCPClient(self.client.get_transport(), socket_timeout=timeout)
+
     @classmethod
     def _push_file(cls, sftp, src, dst):
         try:
@@ -560,21 +565,25 @@ class SshConnection(SshConnectionBase):
 
     def push(self, sources, dest, timeout=30):
         # If using scp, use implementation from base class
-        if self.use_scp:
-            super().push(sources, dest, timeout)
-        else:
-            with _handle_paramiko_exceptions(), self._get_sftp(timeout) as sftp:
-                for source in sources:
-                    self._push_path(sftp, source, dest)
+        with _handle_paramiko_exceptions():
+            if self.use_scp:
+                scp = self._get_scp(timeout)
+                scp.put(sources, dest, recursive=True)
+            else:
+                with self._get_sftp(timeout) as sftp:
+                    for source in sources:
+                        self._push_path(sftp, source, dest)
 
     def pull(self, sources, dest, timeout=30):
         # If using scp, use implementation from base class
-        if self.use_scp:
-            super().pull(sources, dest, timeout)
-        else:
-            with _handle_paramiko_exceptions(), self._get_sftp(timeout) as sftp:
-                for source in sources:
-                    self._pull_path(sftp, source, dest)
+        with _handle_paramiko_exceptions():
+            if self.use_scp:
+                scp = self._get_scp(timeout)
+                scp.get(sources, dest, recursive=True)
+            else:
+                with self._get_sftp(timeout) as sftp:
+                    for source in sources:
+                        self._pull_path(sftp, source, dest)
 
     def execute(self, command, timeout=None, check_exit_code=True,
                 as_root=False, strip_colors=True, will_succeed=False): #pylint: disable=unused-argument
