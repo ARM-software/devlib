@@ -55,7 +55,8 @@ from devlib.exception import (HostError, TargetStableError, TargetNotRespondingE
 from devlib.utils.misc import (which, strip_bash_colors, check_output,
                                sanitize_cmd_template, memoized, redirect_streams)
 from devlib.utils.types import boolean
-from devlib.connection import ConnectionBase, ParamikoBackgroundCommand, PopenBackgroundCommand
+from devlib.connection import (ConnectionBase, ParamikoBackgroundCommand, PopenBackgroundCommand,
+                               SSHTransferManager)
 
 
 ssh = None
@@ -367,7 +368,11 @@ class SshConnection(SshConnectionBase):
                  platform=None,
                  sudo_cmd="sudo -S -- sh -c {}",
                  strict_host_check=True,
-                 use_scp=False
+                 use_scp=False,
+                 poll_transfers=False,
+                 start_transfer_poll_delay=30,
+                 total_transfer_timeout=3600,
+                 transfer_poll_period=30,
                  ):
 
         super().__init__(
@@ -384,6 +389,13 @@ class SshConnection(SshConnectionBase):
 
         # Allow using scp for file transfer if sftp is not supported
         self.use_scp = use_scp
+        self.poll_transfers=poll_transfers
+        if poll_transfers:
+            transfer_opts = {'start_transfer_poll_delay': start_transfer_poll_delay,
+                            'total_timeout': total_transfer_timeout,
+                            'poll_period': transfer_poll_period,
+                            }
+
         if self.use_scp:
             logger.debug('Using SCP for file transfer')
             _check_env()
@@ -391,6 +403,7 @@ class SshConnection(SshConnectionBase):
         else:
             logger.debug('Using SFTP for file transfer')
 
+        self.transfer_mgr = SSHTransferManager(self, **transfer_opts) if poll_transfers else None
         self.client = self._make_client()
         atexit.register(self.close)
 
@@ -442,19 +455,20 @@ class SshConnection(SshConnectionBase):
             channel = transport.open_session()
             return channel
 
+    def _get_progress_cb(self):
+        return self.transfer_mgr.progress_cb if self.transfer_mgr is not None else None
+
     def _get_sftp(self, timeout):
         sftp = self.client.open_sftp()
         sftp.get_channel().settimeout(timeout)
         return sftp
 
-    
     def _get_scp(self, timeout):
-        return SCPClient(self.client.get_transport(), socket_timeout=timeout)
+        return SCPClient(self.client.get_transport(), socket_timeout=timeout, progress=self._get_progress_cb())
 
-    @classmethod
-    def _push_file(cls, sftp, src, dst):
+    def _push_file(self, sftp, src, dst):
         try:
-            sftp.put(src, dst)
+            sftp.put(src, dst, callback=self._get_progress_cb())
         # Maybe the dst was a folder
         except OSError as orig_excep:
             # If dst was an existing folder, we add the src basename to create
@@ -465,7 +479,7 @@ class SshConnection(SshConnectionBase):
             )
             logger.debug('Trying: {} -> {}'.format(src, new_dst))
             try:
-                sftp.put(src, new_dst)
+                sftp.put(src, new_dst, callback=self._get_progress_cb())
             # This still failed, which either means:
             # * There are some missing folders in the dirnames
             # * Something else SFTP-related is wrong
@@ -483,22 +497,20 @@ class SshConnection(SshConnectionBase):
         else:
             return True
 
-    @classmethod
-    def _push_folder(cls, sftp, src, dst):
+    def _push_folder(self, sftp, src, dst):
         # Behave like the "mv" command or adb push: a new folder is created
         # inside the destination folder, rather than merging the trees, but
         # only if the destination already exists. Otherwise, it is use as-is as
         # the new hierarchy name.
-        if cls._path_exists(sftp, dst):
+        if self._path_exists(sftp, dst):
             dst = os.path.join(
                 dst,
                 os.path.basename(os.path.normpath(src)),
             )
 
-        return cls._push_folder_internal(sftp, src, dst)
+        return self._push_folder_internal(sftp, src, dst)
 
-    @classmethod
-    def _push_folder_internal(cls, sftp, src, dst):
+    def _push_folder_internal(self, sftp, src, dst):
         # This might fail if the folder already exists
         with contextlib.suppress(IOError):
             sftp.mkdir(dst)
@@ -508,20 +520,18 @@ class SshConnection(SshConnectionBase):
             src_path = os.path.join(src, name)
             dst_path = os.path.join(dst, name)
             if entry.is_dir():
-                push = cls._push_folder_internal
+                push = self._push_folder_internal
             else:
-                push = cls._push_file
+                push = self._push_file
 
             push(sftp, src_path, dst_path)
 
-    @classmethod
-    def _push_path(cls, sftp, src, dst):
-        logger.debug('Pushing via sftp: {} -> {}'.format(src,dst))
-        push = cls._push_folder if os.path.isdir(src) else cls._push_file
+    def _push_path(self, sftp, src, dst):
+        logger.debug('Pushing via sftp: {} -> {}'.format(src, dst))
+        push = self._push_folder if os.path.isdir(src) else self._push_file
         push(sftp, src, dst)
 
-    @classmethod
-    def _pull_file(cls, sftp, src, dst):
+    def _pull_file(self, sftp, src, dst):
         # Pulling a file into a folder will use the source basename
         if os.path.isdir(dst):
             dst = os.path.join(
@@ -532,10 +542,9 @@ class SshConnection(SshConnectionBase):
         with contextlib.suppress(FileNotFoundError):
             os.remove(dst)
 
-        sftp.get(src, dst)
-
-    @classmethod
-    def _pull_folder(cls, sftp, src, dst):
+        sftp.get(src, dst, callback=self._get_progress_cb())
+  
+    def _pull_folder(self, sftp, src, dst):
         with contextlib.suppress(FileNotFoundError):
             try:
                 shutil.rmtree(dst)
@@ -548,42 +557,59 @@ class SshConnection(SshConnectionBase):
             src_path = os.path.join(src, filename)
             dst_path = os.path.join(dst, filename)
             if stat.S_ISDIR(fileattr.st_mode):
-                pull = cls._pull_folder
+                pull = self._pull_folder
             else:
-                pull = cls._pull_file
+                pull = self._pull_file
 
             pull(sftp, src_path, dst_path)
 
-    @classmethod
-    def _pull_path(cls, sftp, src, dst):
-        logger.debug('Pulling via sftp: {} -> {}'.format(src,dst))
+    def _pull_path(self, sftp, src, dst):
+        logger.debug('Pulling via sftp: {} -> {}'.format(src, dst))
         try:
-            cls._pull_file(sftp, src, dst)
+            self._pull_file(sftp, src, dst)
         except IOError:
             # Maybe that was a directory, so retry as such
-            cls._pull_folder(sftp, src, dst)
+            self._pull_folder(sftp, src, dst)
 
-    def push(self, sources, dest, timeout=30):
-        # If using scp, use implementation from base class
-        with _handle_paramiko_exceptions():
+    def push(self, sources, dest, timeout=None):
+        self._push_pull('push', sources, dest, timeout)
+
+    def pull(self, sources, dest, timeout=None):
+        self._push_pull('pull', sources, dest, timeout)
+
+    def _push_pull(self, action, sources, dest, timeout):
+        if action not in ['push', 'pull']:
+            raise ValueError("Action must be either `push` or `pull`")
+
+        # If timeout is set, or told not to poll
+        if timeout is not None or not self.poll_transfers:
             if self.use_scp:
                 scp = self._get_scp(timeout)
-                scp.put(sources, dest, recursive=True)
+                scp_cmd = getattr(scp, 'put' if action == 'push' else 'get')
+                scp_msg = '{}ing via scp: {} -> {}'.format(action, sources, dest)
+                logger.debug(scp_msg.capitalize())
+                scp_cmd(sources, dest, recursive=True)
             else:
-                with self._get_sftp(timeout) as sftp:
+                sftp = self._get_sftp(timeout)
+                sftp_cmd = getattr(self, '_' + action + '_path')
+                with _handle_paramiko_exceptions():
                     for source in sources:
-                        self._push_path(sftp, source, dest)
+                        sftp_cmd(sftp, source, dest)
 
-    def pull(self, sources, dest, timeout=30):
-        # If using scp, use implementation from base class
-        with _handle_paramiko_exceptions():
-            if self.use_scp:
-                scp = self._get_scp(timeout)
-                scp.get(sources, dest, recursive=True)
-            else:
-                with self._get_sftp(timeout) as sftp:
-                    for source in sources:
-                        self._pull_path(sftp, source, dest)
+        # No timeout, and polling is set
+        elif self.use_scp:
+            scp = self._get_scp(timeout)
+            scp_cmd = getattr(scp, 'put' if action == 'push' else 'get')
+            with _handle_paramiko_exceptions(), self.transfer_mgr.manage(sources, dest, action, scp):
+                scp_msg = '{}ing via scp: {} -> {}'.format(action, sources, dest)
+                logger.debug(scp_msg.capitalize())
+                scp_cmd(sources, dest, recursive=True)
+        else:
+            sftp = self._get_sftp(timeout)
+            sftp_cmd = getattr(self, '_' + action + '_path')
+            with _handle_paramiko_exceptions(), self.transfer_mgr.manage(sources, dest, action, sftp):
+                for source in sources:
+                    sftp_cmd(sftp, source, dest)
 
     def execute(self, command, timeout=None, check_exit_code=True,
                 as_root=False, strip_colors=True, will_succeed=False): #pylint: disable=unused-argument
