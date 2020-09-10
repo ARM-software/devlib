@@ -302,9 +302,12 @@ class SshConnectionBase(ConnectionBase):
         self.options = {}
         logger.debug('Logging in {}@{}'.format(username, host))
 
+    def fmt_remote_path(self, path):
+        return '{}@{}:{}'.format(self.username, self.host, path)
+
     def push(self, sources, dest, timeout=30):
         # Quote the destination as SCP would apply globbing too
-        dest = '{}@{}:{}'.format(self.username, self.host, quote(dest))
+        dest = self.fmt_remote_path(quote(dest))
         paths = sources + [dest]
         return self._scp(paths, timeout)
 
@@ -312,7 +315,7 @@ class SshConnectionBase(ConnectionBase):
         # First level of escaping for the remote shell
         sources = ' '.join(map(quote, sources))
         # All the sources are merged into one scp parameter
-        sources = '{}@{}:{}'.format(self.username, self.host, sources)
+        sources = self.fmt_remote_path(sources)
         paths = [sources, dest]
         self._scp(paths, timeout)
 
