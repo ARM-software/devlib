@@ -286,7 +286,7 @@ class SshConnectionBase(ConnectionBase):
                  keyfile=None,
                  port=None,
                  platform=None,
-                 sudo_cmd="sudo -S -- sh -c {}",
+                 sudo_cmd="sudo -p ' ' -S -- sh -c {}",
                  strict_host_check=True,
                  ):
         super().__init__()
@@ -369,7 +369,7 @@ class SshConnection(SshConnectionBase):
                  port=22,
                  timeout=None,
                  platform=None,
-                 sudo_cmd="sudo -S -- sh -c {}",
+                 sudo_cmd="sudo -p ' ' -S -- sh -c {}",
                  strict_host_check=True,
                  use_scp=False,
                  poll_transfers=False,
