@@ -215,7 +215,7 @@ class Target(object):
     @memoized
     def page_size_kb(self):
         cmd = "cat /proc/self/smaps | {0} grep KernelPageSize | {0} head -n 1 | {0} awk '{{ print $2 }}'"
-        return int(self.execute(cmd.format(self.busybox)))
+        return int(self.execute(cmd.format(self.busybox)) or 0)
 
     @property
     def shutils(self):
