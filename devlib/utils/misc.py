@@ -205,7 +205,7 @@ def check_output(command, timeout=None, ignore=None, inputtext=None, **kwargs):
     """This is a version of subprocess.check_output that adds a timeout parameter to kill
     the subprocess if it does not return within the specified time."""
     process = get_subprocess(command, **kwargs)
-    return check_subprocess_output(process, timeout=timeout, inputtext=inputtext)
+    return check_subprocess_output(process, timeout=timeout, ignore=ignore, inputtext=inputtext)
 
 
 def walk_modules(path):
