@@ -189,7 +189,7 @@ def check_subprocess_output(process, timeout=None, ignore=None, inputtext=None):
 
     # Currently errors=replace is needed as 0x8c throws an error
     output = output.decode(sys.stdout.encoding or 'utf-8', "replace") if output else ''
-    error = error.decode(sys.stderr.encoding or 'utf-8', "replace") if output else ''
+    error = error.decode(sys.stderr.encoding or 'utf-8', "replace") if error else ''
 
     if timeout_expired:
         raise TimeoutError(process.args, output='\n'.join([output, error]))
