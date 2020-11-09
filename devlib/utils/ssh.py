@@ -59,6 +59,9 @@ from devlib.connection import (ConnectionBase, ParamikoBackgroundCommand, PopenB
                                SSHTransferManager)
 
 
+DEFAULT_SSH_SUDO_COMMAND = "sudo -p ' ' -S -- sh -c {}"
+
+
 ssh = None
 scp = None
 sshpass = None
@@ -66,6 +69,7 @@ sshpass = None
 
 logger = logging.getLogger('ssh')
 gem5_logger = logging.getLogger('gem5-connection')
+
 
 @contextlib.contextmanager
 def _handle_paramiko_exceptions(command=None):
@@ -286,7 +290,7 @@ class SshConnectionBase(ConnectionBase):
                  keyfile=None,
                  port=None,
                  platform=None,
-                 sudo_cmd="sudo -p ' ' -S -- sh -c {}",
+                 sudo_cmd=DEFAULT_SSH_SUDO_COMMAND,
                  strict_host_check=True,
                  ):
         super().__init__()
@@ -369,7 +373,7 @@ class SshConnection(SshConnectionBase):
                  port=22,
                  timeout=None,
                  platform=None,
-                 sudo_cmd="sudo -p ' ' -S -- sh -c {}",
+                 sudo_cmd=DEFAULT_SSH_SUDO_COMMAND,
                  strict_host_check=True,
                  use_scp=False,
                  poll_transfers=False,
@@ -546,7 +550,7 @@ class SshConnection(SshConnectionBase):
             os.remove(dst)
 
         sftp.get(src, dst, callback=self._get_progress_cb())
-  
+
     def _pull_folder(self, sftp, src, dst):
         with contextlib.suppress(FileNotFoundError):
             try:
