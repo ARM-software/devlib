@@ -834,7 +834,7 @@ class LogcatMonitor(object):
         if self._logcat_format:
             logcat_cmd = "{} -v {}".format(logcat_cmd, quote(self._logcat_format))
 
-        logcat_cmd = get_adb_command(self.target.conn.device, logcat_cmd)
+        logcat_cmd = get_adb_command(self.target.conn.device, logcat_cmd, self.target.adb_server)
 
         logger.debug('logcat command ="{}"'.format(logcat_cmd))
         self._logcat = pexpect.spawn(logcat_cmd, logfile=self._logfile, encoding='utf-8')
