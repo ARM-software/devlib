@@ -1354,7 +1354,7 @@ class Gem5Connection(TelnetConnection):
         both of these.
         """
         gem5_logger.debug("Sending Sync")
-        self.conn.send("echo \*\*sync\*\*\n")
+        self.conn.send("echo \\*\\*sync\\*\\*\n")
         self.conn.expect(r"\*\*sync\*\*", timeout=self.default_timeout)
         self.conn.expect([self.conn.UNIQUE_PROMPT, self.conn.PROMPT], timeout=self.default_timeout)
         self.conn.expect([self.conn.UNIQUE_PROMPT, self.conn.PROMPT], timeout=self.default_timeout)
