@@ -495,7 +495,7 @@ def escape_spaces(text):
 
     .. note:: :func:`pipes.quote` should be favored where possible.
     """
-    return text.replace(' ', '\ ')
+    return text.replace(' ', '\\ ')
 
 
 def getch(count=1):

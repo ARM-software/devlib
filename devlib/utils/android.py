@@ -649,7 +649,7 @@ def grant_app_permissions(target, package):
     dumpsys = target.execute('dumpsys package {}'.format(package))
 
     permissions = re.search(
-        'requested permissions:\s*(?P<permissions>(android.permission.+\s*)+)', dumpsys
+        r'requested permissions:\s*(?P<permissions>(android.permission.+\s*)+)', dumpsys
     )
     if permissions is None:
         return
