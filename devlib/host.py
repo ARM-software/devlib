@@ -101,7 +101,7 @@ class LocalConnection(ConnectionBase):
             if self.unrooted:
                 raise TargetStableError('unrooted')
             password = self._get_password()
-            command = 'echo {} | sudo -p ' ' -S -- sh -c '.format(quote(password)) + quote(command)
+            command = "echo {} | sudo -p ' ' -S -- sh -c ".format(quote(password)) + quote(command)
         ignore = None if check_exit_code else 'all'
         try:
             stdout, stderr = check_output(command, shell=True, timeout=timeout, ignore=ignore)
@@ -119,7 +119,7 @@ class LocalConnection(ConnectionBase):
             if self.unrooted:
                 raise TargetStableError('unrooted')
             password = self._get_password()
-            command = 'echo {} | sudo -p ' ' -S '.format(quote(password)) + command
+            command = "echo {} | sudo -p ' ' -S ".format(quote(password)) + command
 
         # Make sure to get a new PGID so PopenBackgroundCommand() can kill
         # all sub processes that could be started without troubles.
