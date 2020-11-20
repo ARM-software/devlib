@@ -127,7 +127,7 @@ class LocalConnection(ConnectionBase):
             password = self._get_password()
             # The sudo prompt will add a space on stderr, but we cannot filter
             # it out here
-            command = "echo {} | sudo -p ' ' -S -- {}".format(quote(password), command)
+            command = "echo {} | sudo -p ' ' -S -- sh -c {}".format(quote(password), quote(command))
 
         # Make sure to get a new PGID so PopenBackgroundCommand() can kill
         # all sub processes that could be started without troubles.
