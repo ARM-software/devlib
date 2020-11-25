@@ -215,10 +215,14 @@ class ApkInfo(object):
     @property
     def methods(self):
         if self._methods is None:
+            # Only try to extract once
+            self._methods = []
             with tempfile.TemporaryDirectory() as tmp_dir:
                 with zipfile.ZipFile(self._apk_path, 'r') as z:
-                    extracted = z.extract('classes.dex', tmp_dir)
-
+                    try:
+                        extracted = z.extract('classes.dex', tmp_dir)
+                    except KeyError:
+                        return []
                 dexdump = os.path.join(os.path.dirname(aapt), 'dexdump')
                 command = [dexdump, '-l', 'xml', extracted]
                 dump = self._run(command)
