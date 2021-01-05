@@ -734,11 +734,13 @@ def _discover_aapt(env):
         aapt2_path = ''
         versions = os.listdir(env.build_tools)
         for version in reversed(sorted(versions)):
-            if not aapt2_path and not os.path.isfile(aapt2_path):
+            if not os.path.isfile(aapt2_path):
                 aapt2_path = os.path.join(env.build_tools, version, 'aapt2')
-            if not aapt_path and not os.path.isfile(aapt_path):
+            if not os.path.isfile(aapt_path):
                 aapt_path = os.path.join(env.build_tools, version, 'aapt')
                 aapt_version = 1
+            # Use latest available version for aapt/appt2 but ensure at least one is valid.
+            if os.path.isfile(aapt2_path) or os.path.isfile(aapt_path):
                 break
 
         # Use aapt2 only if present and we have a suitable version
