@@ -20,18 +20,19 @@ Utility functions for working with Android devices through adb.
 """
 # pylint: disable=E1103
 import glob
-import os
-import re
-import sys
-import time
 import logging
-import tempfile
-import subprocess
-from collections import defaultdict
+import os
 import pexpect
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
 import xml.etree.ElementTree
 import zipfile
-import uuid
+
+from collections import defaultdict
 
 try:
     from shlex import quote
