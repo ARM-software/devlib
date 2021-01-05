@@ -29,10 +29,11 @@ import sys
 import tempfile
 import time
 import uuid
-import xml.etree.ElementTree
 import zipfile
 
 from collections import defaultdict
+from io import StringIO
+from lxml import etree
 
 try:
     from shlex import quote
@@ -228,7 +229,10 @@ class ApkInfo(object):
                 command = [dexdump, '-l', 'xml', extracted]
                 dump = self._run(command)
 
-            xml_tree = xml.etree.ElementTree.fromstring(dump)
+            # Dexdump from build tools v30.0.X does not seem to produce
+            # valid xml from certain APKs so ignore errors and attempt to recover.
+            parser = etree.XMLParser(encoding='utf-8', recover=True)
+            xml_tree = etree.parse(StringIO(dump), parser)
 
             package = next((i for i in xml_tree.iter('package')
                            if i.attrib['name'] == self.package), None)
