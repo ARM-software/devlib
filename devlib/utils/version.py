@@ -33,8 +33,11 @@ def get_devlib_version():
 
 
 def get_commit():
-    p = Popen(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__),
-              stdout=PIPE, stderr=PIPE)
+    try:
+        p = Popen(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__),
+                  stdout=PIPE, stderr=PIPE)
+    except FileNotFoundError:
+        return None
     std, _ = p.communicate()
     p.wait()
     if p.returncode:
