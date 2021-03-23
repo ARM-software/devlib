@@ -221,7 +221,7 @@ class PopenBackgroundCommand(BackgroundCommand):
         popen = self.popen
         os.killpg(os.getpgid(popen.pid), signal.SIGTERM)
         try:
-            popen.wait(timeout=_KILL_TIMEOUT)
+            popen.wait(timeout=kill_timeout)
         except subprocess.TimeoutExpired:
             os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
 
@@ -351,7 +351,7 @@ class AdbBackgroundCommand(BackgroundCommand):
     def _cancel(self, kill_timeout):
         self.send_signal(signal.SIGTERM)
         try:
-            self.adb_popen.wait(timeout=_KILL_TIMEOUT)
+            self.adb_popen.wait(timeout=kill_timeout)
         except subprocess.TimeoutExpired:
             self.send_signal(signal.SIGKILL)
             self.adb_popen.kill()
