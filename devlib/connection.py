@@ -436,7 +436,7 @@ class TransferManagerBase(ABC):
             self.transfer_started.clear()
             self.transfer_completed.clear()
             self.transfer_aborted.clear()
-    
+
     def _monitor(self):
         start_t = monotonic()
         self.transfer_completed.wait(self.start_transfer_poll_delay)
@@ -470,7 +470,7 @@ class PopenTransferManager(TransferManagerBase):
     def set_transfer_and_wait(self, popen_bg_cmd):
         self.transfer = popen_bg_cmd
         ret = self.transfer.wait()
-      
+
         if ret and not self.transfer_aborted.is_set():
             raise subprocess.CalledProcessError(ret, self.transfer.popen.args)
         elif self.transfer_aborted.is_set():
