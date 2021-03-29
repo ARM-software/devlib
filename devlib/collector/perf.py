@@ -24,7 +24,7 @@ from devlib.collector import (CollectorBase, CollectorOutput,
 from devlib.utils.misc import ensure_file_directory_exists as _f
 
 
-PERF_COMMAND_TEMPLATE = '{binary} {command} {options} {events} sleep 1000 > {outfile} 2>&1 '
+PERF_STAT_COMMAND_TEMPLATE = '{binary} {command} {options} {events} {sleep_cmd} > {outfile} 2>&1 '
 PERF_REPORT_COMMAND_TEMPLATE= '{binary} report {options} -i {datafile} > {outfile} 2>&1 '
 PERF_RECORD_COMMAND_TEMPLATE= '{binary} record {options} {events} -o {outfile}'
 
@@ -141,14 +141,15 @@ class PerfCollector(CollectorBase):
 
     def start(self):
         for command in self.commands:
-            self.target.kick_off(command, as_root=self.target.is_rooted)
+            self.target.background(command, as_root=self.target.is_rooted)
 
     def stop(self):
         self.target.killall(self.perf_type, signal='SIGINT',
                             as_root=self.target.is_rooted)
-        # perf doesn't transmit the signal to its sleep call so handled here:
-        self.target.killall('sleep', as_root=self.target.is_rooted)
-        # NB: we hope that no other "important" sleep is on-going
+        if self.perf_type == "perf" and self.command == "stat":
+            # perf doesn't transmit the signal to its sleep call so handled here:
+            self.target.killall('sleep', as_root=self.target.is_rooted)
+            # NB: we hope that no other "important" sleep is on-going
 
     def set_output(self, output_path):
         self.output_path = output_path
@@ -188,10 +189,12 @@ class PerfCollector(CollectorBase):
 
     def _build_perf_stat_command(self, options, events, label):
         event_string = ' '.join(['-e {}'.format(e) for e in events])
-        command = PERF_COMMAND_TEMPLATE.format(binary = self.binary,
+        sleep_cmd = 'sleep 1000' if self.perf_type == 'perf' else ''
+        command = PERF_STAT_COMMAND_TEMPLATE.format(binary = self.binary,
                                                command = self.command,
                                                options = options or '',
                                                events = event_string,
+                                               sleep_cmd = sleep_cmd,
                                                outfile = self._get_target_file(label, 'out'))
         return command
 
