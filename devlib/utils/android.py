@@ -582,7 +582,7 @@ def adb_background_shell(conn, command,
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE,
                          as_root=False):
-    """Runs the sepcified command in a subprocess, returning the the Popen object."""
+    """Runs the specified command in a subprocess, returning the the Popen object."""
     device = conn.device
     adb_server = conn.adb_server
 
