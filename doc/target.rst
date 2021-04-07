@@ -136,7 +136,7 @@ Target
 .. attribute:: Target.system_id
 
    A unique identifier for the system running on the target. This identifier is
-   intended to be uninque for the combination of hardware, kernel, and file
+   intended to be unique for the combination of hardware, kernel, and file
    system.
 
 .. attribute:: Target.model
