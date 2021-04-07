@@ -125,6 +125,14 @@ Target
    This is a dict that contains a mapping of OS version elements to their
    values. This mapping is OS-specific.
 
+.. attribute:: Target.hostname
+
+   A string containing the hostname of the target.
+
+.. attribute:: Target.hostid
+
+   A numerical id used to represent the identity of the target.
+
 .. attribute:: Target.system_id
 
    A unique identifier for the system running on the target. This identifier is
