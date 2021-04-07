@@ -140,6 +140,10 @@ class Target(object):
         return int(self.execute('{} hostid'.format(self.busybox)).strip(), 16)
 
     @property
+    def hostname(self):
+        return self.execute('{} hostname'.format(self.busybox)).strip()
+
+    @property
     def os_version(self):  # pylint: disable=no-self-use
         return {}
 
