@@ -74,7 +74,7 @@ with open("README.rst", "r") as fh:
 
 params = dict(
     name='devlib',
-    description='A framework for automating workload execution and measurment collection on ARM devices.',
+    description='A library for interacting with and instrumentation of remote devices.',
     long_description=long_description,
     version=__version__,
     packages=packages,
