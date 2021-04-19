@@ -133,6 +133,9 @@ Target
 
    A numerical id used to represent the identity of the target.
 
+   .. note:: Currently on 64-bit PowerPC devices this id will always be 0. This is
+             due to the included busybox binary being linked with musl.
+
 .. attribute:: Target.system_id
 
    A unique identifier for the system running on the target. This identifier is
