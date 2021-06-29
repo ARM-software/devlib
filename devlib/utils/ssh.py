@@ -660,7 +660,7 @@ class SshConnection(SshConnectionBase):
             # Read are not buffered so we will always get the data as soon as
             # they arrive
             return (
-                channel.makefile_stdin(),
+                channel.makefile_stdin('w', 0),
                 channel.makefile(),
                 channel.makefile_stderr(),
             )
