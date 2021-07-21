@@ -784,7 +784,7 @@ class tls_property:
     def __init__(self, factory):
         self.factory = factory
         # Lock accesses to shared WeakKeyDictionary and WeakSet
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     def __get__(self, instance, owner=None):
         return _BoundTLSProperty(self, instance, owner)
