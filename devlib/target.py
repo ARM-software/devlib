@@ -485,6 +485,9 @@ class Target(object):
 
     @call_conn
     def push(self, source, dest, as_root=False, timeout=None, globbing=False):  # pylint: disable=arguments-differ
+        source = str(source)
+        dest = str(dest)
+
         sources = glob.glob(source) if globbing else [source]
         self._prepare_xfer('push', sources, dest)
 
@@ -541,6 +544,9 @@ class Target(object):
 
     @call_conn
     def pull(self, source, dest, as_root=False, timeout=None, globbing=False):  # pylint: disable=arguments-differ
+        source = str(source)
+        dest = str(dest)
+
         if globbing:
             sources = self._expand_glob(source, as_root=as_root)
         else:
