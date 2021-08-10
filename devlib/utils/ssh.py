@@ -558,6 +558,12 @@ class SshConnection(SshConnectionBase):
         sftp.get(src, dst, callback=self._get_progress_cb())
 
     def _pull_folder(self, sftp, src, dst):
+        if os.path.isdir(dst):
+            dst = os.path.join(
+                dst,
+                os.path.basename(src),
+            )
+
         with contextlib.suppress(FileNotFoundError):
             try:
                 shutil.rmtree(dst)
