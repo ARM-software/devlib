@@ -36,6 +36,7 @@ from future.utils import raise_from
 
 from paramiko.client import SSHClient, AutoAddPolicy, RejectPolicy
 import paramiko.ssh_exception
+from paramiko.sftp_file import SFTPFile
 from scp import SCPClient
 # By default paramiko is very verbose, including at the INFO level
 logging.getLogger("paramiko").setLevel(logging.WARNING)
@@ -58,6 +59,15 @@ from devlib.utils.types import boolean
 from devlib.connection import (ConnectionBase, ParamikoBackgroundCommand, PopenBackgroundCommand,
                                SSHTransferManager)
 
+
+# Workaround a speed issue in paramiko:
+# https://github.com/paramiko/paramiko/issues/1080
+# If left to its default value, paramiko SFTPClient.get() will prefetch
+# assuming MAX_REQUEST_SIZE blocks. The server will then send a smaller block,
+# rendering the prefetching useless, and paramiko falls back on sequential
+# read, which destroys performance (more than 20x slow down in a case with a
+# 3.5MB file)
+SFTPFile.MAX_REQUEST_SIZE = 4096
 
 DEFAULT_SSH_SUDO_COMMAND = "sudo -k -p ' ' -S -- sh -c {}"
 
