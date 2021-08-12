@@ -424,26 +424,7 @@ class SshConnection(SshConnectionBase):
         return SCPClient(self.client.get_transport(), socket_timeout=timeout, progress=self._get_progress_cb())
 
     def _push_file(self, sftp, src, dst):
-        try:
-            sftp.put(src, dst, callback=self._get_progress_cb())
-        # Maybe the dst was a folder
-        except OSError as orig_excep:
-            # If dst was an existing folder, we add the src basename to create
-            # a new destination for the file as cp would do
-            new_dst = os.path.join(
-                dst,
-                os.path.basename(src),
-            )
-            logger.debug('Trying: {} -> {}'.format(src, new_dst))
-            try:
-                sftp.put(src, new_dst, callback=self._get_progress_cb())
-            # This still failed, which either means:
-            # * There are some missing folders in the dirnames
-            # * Something else SFTP-related is wrong
-            except OSError as e:
-                # Raise the original exception, as it is closer to what the
-                # user asked in the first place
-                raise orig_excep
+        sftp.put(src, dst, callback=self._get_progress_cb())
 
     @classmethod
     def _path_exists(cls, sftp, path):
@@ -455,29 +436,13 @@ class SshConnection(SshConnectionBase):
             return True
 
     def _push_folder(self, sftp, src, dst):
-        # Behave like the "mv" command or adb push: a new folder is created
-        # inside the destination folder, rather than merging the trees, but
-        # only if the destination already exists. Otherwise, it is use as-is as
-        # the new hierarchy name.
-        if self._path_exists(sftp, dst):
-            dst = os.path.join(
-                dst,
-                os.path.basename(os.path.normpath(src)),
-            )
-
-        return self._push_folder_internal(sftp, src, dst)
-
-    def _push_folder_internal(self, sftp, src, dst):
-        # This might fail if the folder already exists
-        with contextlib.suppress(IOError):
-            sftp.mkdir(dst)
-
+        sftp.mkdir(dst)
         for entry in os.scandir(src):
             name = entry.name
             src_path = os.path.join(src, name)
             dst_path = os.path.join(dst, name)
             if entry.is_dir():
-                push = self._push_folder_internal
+                push = self._push_folder
             else:
                 push = self._push_file
 
@@ -489,25 +454,9 @@ class SshConnection(SshConnectionBase):
         push(sftp, src, dst)
 
     def _pull_file(self, sftp, src, dst):
-        # Pulling a file into a folder will use the source basename
-        if os.path.isdir(dst):
-            dst = os.path.join(
-                dst,
-                os.path.basename(src),
-            )
-
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(dst)
-
         sftp.get(src, dst, callback=self._get_progress_cb())
 
     def _pull_folder(self, sftp, src, dst):
-        with contextlib.suppress(FileNotFoundError):
-            try:
-                shutil.rmtree(dst)
-            except OSError:
-                os.remove(dst)
-
         os.makedirs(dst)
         for fileattr in sftp.listdir_attr(src):
             filename = fileattr.filename
@@ -836,7 +785,7 @@ class TelnetConnection(SshConnectionBase):
     def push(self, sources, dest, timeout=30):
         # Quote the destination as SCP would apply globbing too
         dest = self.fmt_remote_path(quote(dest))
-        paths = sources + [dest]
+        paths = list(sources) + [dest]
         return self._scp(paths, timeout)
 
     def pull(self, sources, dest, timeout=30):
@@ -1113,9 +1062,6 @@ class Gem5Connection(TelnetConnection):
             # We need to copy the file to copy to the temporary directory
             self._move_to_temp_dir(source)
 
-            # Dest in gem5 world is a file rather than directory
-            if os.path.basename(dest) != filename:
-                dest = os.path.join(dest, filename)
             # Back to the gem5 world
             filename = quote(self.gem5_input_dir + filename)
             self._gem5_shell("ls -al {}".format(filename))

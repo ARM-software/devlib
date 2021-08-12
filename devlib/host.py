@@ -68,11 +68,6 @@ class LocalConnection(ConnectionBase):
     def _copy_path(self, source, dest):
         self.logger.debug('copying {} to {}'.format(source, dest))
         if os.path.isdir(source):
-            # Behave similarly as cp, scp, adb push, etc. by creating a new
-            # folder instead of merging hierarchies
-            if os.path.exists(dest):
-                dest = os.path.join(dest, os.path.basename(os.path.normpath(source)))
-
             # Use distutils copy_tree since it behaves the same as
             # shutils.copytree except that it won't fail if some folders
             # already exist.

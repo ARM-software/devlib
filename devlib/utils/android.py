@@ -315,6 +315,7 @@ class AdbConnection(ConnectionBase):
         return self._push_pull('pull', sources, dest, timeout)
 
     def _push_pull(self, action, sources, dest, timeout):
+        sources = list(sources)
         paths = sources + [dest]
 
         # Quote twice to avoid expansion by host shell, then ADB globbing
