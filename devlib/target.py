@@ -53,7 +53,7 @@ from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetError, HostError) # pylint: disable=redefined-builtin
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
-from devlib.utils.misc import memoized, isiterable, convert_new_lines
+from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
 from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
 from devlib.utils.misc import batch_contextmanager, tls_property, nullcontext
@@ -577,10 +577,15 @@ class Target(object):
             if dst_path_exists(dest) and not dst_is_dir(dest):
                 raise NotADirectoryError('A folder dest is required for multiple matches but destination is a file: {}'.format(dest))
 
-        return {
+        # TODO: since rewrite_dst() will currently return a different path for
+        # each source, it will not bring anything. In order to be useful,
+        # connections need to be able to understand that if the destination is
+        # an empty folder, the source is supposed to be transfered into it with
+        # the same basename.
+        return groupby_value({
             src: rewrite_dst(src, dest)
             for src in sources
-        }
+        })
 
     @call_conn
     def push(self, source, dest, as_root=False, timeout=None, globbing=False):  # pylint: disable=arguments-differ
@@ -594,13 +599,14 @@ class Target(object):
             return self.conn.push(sources, dest, timeout=timeout)
 
         if as_root:
-            for source, dest in mapping.items():
-                with self._xfer_cache_path(source) as device_tempfile:
-                    do_push([source], device_tempfile)
-                    self.execute("mv -f -- {} {}".format(quote(device_tempfile), quote(dest)), as_root=True)
+            for sources, dest in mapping.items():
+                for source in sources:
+                    with self._xfer_cache_path(source) as device_tempfile:
+                        do_push([source], device_tempfile)
+                        self.execute("mv -f -- {} {}".format(quote(device_tempfile), quote(dest)), as_root=True)
         else:
-            for source, dest in mapping.items():
-                do_push([source], dest)
+            for sources, dest in mapping.items():
+                do_push(sources, dest)
 
     def _expand_glob(self, pattern, **kwargs):
         """
@@ -658,14 +664,15 @@ class Target(object):
             self.conn.pull(sources, dest, timeout=timeout)
 
         if as_root:
-            for source, dest in mapping.items():
-                with self._xfer_cache_path(source) as device_tempfile:
-                    self.execute("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=True)
-                    self.execute("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=True)
-                    do_pull([device_tempfile], dest)
+            for sources, dest in mapping.items():
+                for source in sources:
+                    with self._xfer_cache_path(source) as device_tempfile:
+                        self.execute("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=True)
+                        self.execute("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=True)
+                        do_pull([device_tempfile], dest)
         else:
-            for source, dest in mapping.items():
-                do_pull([source], dest)
+            for sources, dest in mapping.items():
+                do_pull(sources, dest)
 
     def get_directory(self, source_dir, dest, as_root=False):
         """ Pull a directory from the device, after compressing dir """
