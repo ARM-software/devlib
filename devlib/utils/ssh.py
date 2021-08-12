@@ -31,6 +31,7 @@ import contextlib
 import weakref
 import select
 import copy
+import functools
 from pipes import quote
 from future.utils import raise_from
 
@@ -406,6 +407,7 @@ class SshConnection(SshConnectionBase):
     def _get_progress_cb(self):
         return self.transfer_mgr.progress_cb if self.transfer_mgr is not None else None
 
+    @functools.lru_cache()
     def _get_sftp(self, timeout):
         try:
             sftp = self.client.open_sftp()
@@ -417,6 +419,7 @@ class SshConnection(SshConnectionBase):
         sftp.get_channel().settimeout(timeout)
         return sftp
 
+    @functools.lru_cache()
     def _get_scp(self, timeout):
         return SCPClient(self.client.get_transport(), socket_timeout=timeout, progress=self._get_progress_cb())
 
