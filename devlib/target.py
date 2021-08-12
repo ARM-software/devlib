@@ -451,37 +451,136 @@ class Target(object):
         finally:
             self.execute('rm -rf -- {}'.format(quote(folder)), check_exit_code=check_rm)
 
-    def _prepare_xfer(self, action, sources, dest):
+    def _prepare_xfer(self, action, sources, dest, pattern=None, as_root=False):
         """
         Check the sanity of sources and destination and prepare the ground for
         transfering multiple sources.
         """
+
+        once = functools.lru_cache(maxsize=None)
+
+        _target_cache = {}
+        def target_paths_kind(paths):
+            def process(x):
+                x = x.strip()
+                if x == 'notexist':
+                    return None
+                else:
+                    return x
+
+            _paths = [
+                path
+                for path in paths
+                if path not in _target_cache
+            ]
+            if _paths:
+                cmd = '; '.join(
+                    'if [ -d {path} ]; then echo dir; elif [ -e {path} ]; then echo file; else echo notexist; fi'.format(
+                        path=quote(path)
+                    )
+                    for path in _paths
+                )
+                res = self.execute(cmd)
+                _target_cache.update(zip(_paths, map(process, res.split())))
+
+            return [
+                _target_cache[path]
+                for path in paths
+            ]
+
+        _host_cache = {}
+        def host_paths_kind(paths):
+            def path_kind(path):
+                if os.path.isdir(path):
+                    return 'dir'
+                elif os.path.exists(path):
+                    return 'file'
+                else:
+                    return None
+
+            for path in paths:
+                if path not in _host_cache:
+                    _host_cache[path] = path_kind(path)
+
+            return [
+                _host_cache[path]
+                for path in paths
+            ]
+
+        # TODO: Target.remove() and Target.makedirs() would probably benefit
+        # from being implemented by connections, with the current
+        # implementation in ConnectionBase. This would allow SshConnection to
+        # use SFTP for these operations, which should be cheaper than
+        # Target.execute()
         if action == 'push':
             src_excep = HostError
-            dst_excep = TargetStableError
-            dst_path_exists = self.file_exists
-            dst_is_dir = self.directory_exists
-            dst_mkdir = self.makedirs
+            src_path_kind = host_paths_kind
 
-            for source in sources:
-                if not os.path.exists(source):
-                    raise HostError('No such file "{}"'.format(source))
-        else:
+            dst_mkdir = once(self.makedirs)
+            dst_path_join = self.path.join
+            dst_paths_kind = target_paths_kind
+            dst_remove_file = once(functools.partial(self.remove, as_root=as_root))
+        elif action == 'pull':
             src_excep = TargetStableError
-            dst_excep = HostError
-            dst_path_exists = os.path.exists
-            dst_is_dir = os.path.isdir
-            dst_mkdir = functools.partial(os.makedirs, exist_ok=True)
+            src_path_kind = target_paths_kind
 
-        if not sources:
-            raise src_excep('No file matching: {}'.format(sources))
-        elif len(sources) > 1:
-            if dst_path_exists(dest):
-                if not dst_is_dir(dest):
-                    raise dst_excep('A folder dest is required for multiple matches but destination is a file: {}'.format(dest))
+            dst_mkdir = once(functools.partial(os.makedirs, exist_ok=True))
+            dst_path_join = os.path.join
+            dst_paths_kind = host_paths_kind
+            dst_remove_file = once(os.remove)
+        else:
+            raise ValueError('Unknown action "{}"'.format(action))
+
+        def rewrite_dst(src, dst):
+            new_dst = dst_path_join(dst, os.path.basename(src))
+
+            src_kind, = src_path_kind([src])
+            # Batch both checks to avoid a costly extra execute()
+            dst_kind, new_dst_kind = dst_paths_kind([dst, new_dst])
+
+            if src_kind == 'file':
+                if dst_kind == 'dir':
+                    if new_dst_kind == 'dir':
+                        raise IsADirectoryError(new_dst)
+                    if new_dst_kind == 'file':
+                        dst_remove_file(new_dst)
+                        return new_dst
+                    else:
+                        return new_dst
+                elif dst_kind == 'file':
+                    dst_remove_file(dst)
+                    return dst
+                else:
+                    dst_mkdir(os.path.dirname(dst))
+                    return dst
+            elif src_kind == 'dir':
+                if dst_kind == 'dir':
+                    # Do not allow writing over an existing folder
+                    if new_dst_kind == 'dir':
+                        raise FileExistsError(new_dst)
+                    if new_dst_kind == 'file':
+                        raise FileExistsError(new_dst)
+                    else:
+                        return new_dst
+                elif dst_kind == 'file':
+                    raise FileExistsError(dst_kind)
+                else:
+                    dst_mkdir(os.path.dirname(dst))
+                    return dst
             else:
-                dst_mkdir(dest)
+                raise FileNotFoundError(src)
 
+        if pattern:
+            if not sources:
+                raise src_excep('No file matching source pattern: {}'.format(pattern))
+
+            if dst_path_exists(dest) and not dst_is_dir(dest):
+                raise NotADirectoryError('A folder dest is required for multiple matches but destination is a file: {}'.format(dest))
+
+        return {
+            src: rewrite_dst(src, dest)
+            for src in sources
+        }
 
     @call_conn
     def push(self, source, dest, as_root=False, timeout=None, globbing=False):  # pylint: disable=arguments-differ
@@ -489,18 +588,19 @@ class Target(object):
         dest = str(dest)
 
         sources = glob.glob(source) if globbing else [source]
-        self._prepare_xfer('push', sources, dest)
+        mapping = self._prepare_xfer('push', sources, dest, pattern=source if globbing else None, as_root=as_root)
 
         def do_push(sources, dest):
             return self.conn.push(sources, dest, timeout=timeout)
 
         if as_root:
-            for source in sources:
+            for source, dest in mapping.items():
                 with self._xfer_cache_path(source) as device_tempfile:
                     do_push([source], device_tempfile)
                     self.execute("mv -f -- {} {}".format(quote(device_tempfile), quote(dest)), as_root=True)
         else:
-            do_push(sources, dest)
+            for source, dest in mapping.items():
+                do_push([source], dest)
 
     def _expand_glob(self, pattern, **kwargs):
         """
@@ -552,19 +652,20 @@ class Target(object):
         else:
             sources = [source]
 
-        self._prepare_xfer('pull', sources, dest)
+        mapping = self._prepare_xfer('pull', sources, dest, pattern=source if globbing else None, as_root=as_root)
 
         def do_pull(sources, dest):
             self.conn.pull(sources, dest, timeout=timeout)
 
         if as_root:
-            for source in sources:
+            for source, dest in mapping.items():
                 with self._xfer_cache_path(source) as device_tempfile:
                     self.execute("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=True)
                     self.execute("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=True)
                     do_pull([device_tempfile], dest)
         else:
-            do_pull(sources, dest)
+            for source, dest in mapping.items():
+                do_pull([source], dest)
 
     def get_directory(self, source_dir, dest, as_root=False):
         """ Pull a directory from the device, after compressing dir """
