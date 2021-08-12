@@ -474,7 +474,7 @@ class Target(object):
             dst_mkdir = functools.partial(os.makedirs, exist_ok=True)
 
         if not sources:
-            raise src_excep('No file matching: {}'.format(source))
+            raise src_excep('No file matching: {}'.format(sources))
         elif len(sources) > 1:
             if dst_path_exists(dest):
                 if not dst_is_dir(dest):
