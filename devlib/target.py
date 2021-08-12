@@ -649,7 +649,7 @@ class Target(object):
         return paths
 
     @call_conn
-    def pull(self, source, dest, as_root=False, timeout=None, globbing=False):  # pylint: disable=arguments-differ
+    def pull(self, source, dest, as_root=False, timeout=None, globbing=False, via_temp=False):  # pylint: disable=arguments-differ
         source = str(source)
         dest = str(dest)
 
@@ -658,17 +658,21 @@ class Target(object):
         else:
             sources = [source]
 
+        # The SSH server might not have the right permissions to read the file,
+        # so use a temporary copy instead.
+        via_temp |= as_root
+
         mapping = self._prepare_xfer('pull', sources, dest, pattern=source if globbing else None, as_root=as_root)
 
         def do_pull(sources, dest):
             self.conn.pull(sources, dest, timeout=timeout)
 
-        if as_root:
+        if via_temp:
             for sources, dest in mapping.items():
                 for source in sources:
                     with self._xfer_cache_path(source) as device_tempfile:
-                        self.execute("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=True)
-                        self.execute("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=True)
+                        self.execute("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=as_root)
+                        self.execute("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=as_root)
                         do_pull([device_tempfile], dest)
         else:
             for sources, dest in mapping.items():
