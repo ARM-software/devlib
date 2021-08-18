@@ -241,7 +241,7 @@ class ParamikoBackgroundCommand(BackgroundCommand):
     """
     :mod:`paramiko`-based background command.
     """
-    def __init__(self, conn, chan, pid, as_root, stdin, stdout, stderr, redirect_thread):
+    def __init__(self, conn, chan, pid, as_root, cmd, stdin, stdout, stderr, redirect_thread):
         self.chan = chan
         self.as_root = as_root
         self.conn = conn
@@ -250,6 +250,7 @@ class ParamikoBackgroundCommand(BackgroundCommand):
         self._stdout = stdout
         self._stderr = stderr
         self.redirect_thread = redirect_thread
+        self.cmd = cmd
 
     def send_signal(self, sig):
         # If the command has already completed, we don't want to send a signal
