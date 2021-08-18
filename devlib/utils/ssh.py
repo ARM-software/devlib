@@ -591,6 +591,7 @@ class SshConnection(SshConnectionBase):
         return bg_cmd
 
     def _background(self, command, stdout, stderr, as_root):
+        orig_command = command
         stdout, stderr, command = redirect_streams(stdout, stderr, command)
 
         command = "printf '%s\n' $$; exec sh -c {}".format(quote(command))
@@ -708,6 +709,7 @@ class SshConnection(SshConnectionBase):
             stdout=out_streams['stdout'][0],
             stderr=out_streams['stderr'][0],
             redirect_thread=redirect_thread,
+            cmd=orig_command,
         )
 
     def _close(self):
