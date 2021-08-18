@@ -266,10 +266,20 @@ class ParamikoBackgroundCommand(BackgroundCommand):
         return self._pid
 
     def wait(self):
-        return self.chan.recv_exit_status()
+        status = self.chan.recv_exit_status()
+        # Ensure that the redirection thread is finished copying the content
+        # from paramiko to the pipe.
+        self.redirect_thread.join()
+        return status
 
     def poll(self):
-        if self.chan.exit_status_ready():
+        # Wait for the redirection thread to finish, otherwise we would
+        # indicate the caller that the command is finished and that the streams
+        # are safe to drain, but actually the redirection thread is not
+        # finished yet, which would end up in lost data.
+        if self.redirect_thread.is_alive():
+            return None
+        elif self.chan.exit_status_ready():
             return self.wait()
         else:
             return None
