@@ -94,6 +94,7 @@ params = dict(
         'numpy',
         'pandas',
         'lxml', # More robust xml parsing
+        'nest_asyncio', # Allows running nested asyncio loops
     ],
     extras_require={
         'daq': ['daqpower>=2'],
