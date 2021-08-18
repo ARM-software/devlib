@@ -678,6 +678,7 @@ class SshConnection(SshConnectionBase):
             # Make sure the writing end are closed proper since we are not
             # going to write anything anymore
             for r, w in out_streams.values():
+                w.flush()
                 if r is not w and w is not None:
                     w.close()
 
