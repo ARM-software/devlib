@@ -52,7 +52,10 @@ from pexpect import EOF, TIMEOUT, spawn
 
 # pylint: disable=redefined-builtin,wrong-import-position
 from devlib.exception import (HostError, TargetStableError, TargetNotRespondingError,
-                              TimeoutError, TargetTransientError)
+                              TimeoutError, TargetTransientError,
+                              TargetCalledProcessError,
+                              TargetTransientCalledProcessError,
+                              TargetStableCalledProcessError)
 from devlib.utils.misc import (which, strip_bash_colors, check_output,
                                sanitize_cmd_template, memoized, redirect_streams)
 from devlib.utils.types import boolean
@@ -524,6 +527,8 @@ class SshConnection(SshConnectionBase):
         try:
             with _handle_paramiko_exceptions(command):
                 exit_code, output = self._execute(command, timeout, as_root, strip_colors)
+        except TargetCalledProcessError:
+            raise
         except TargetStableError as e:
             if will_succeed:
                 raise TargetTransientError(e)
@@ -531,8 +536,13 @@ class SshConnection(SshConnectionBase):
                 raise
         else:
             if check_exit_code and exit_code:
-                message = 'Got exit code {}\nfrom: {}\nOUTPUT: {}'
-                raise TargetStableError(message.format(exit_code, command, output))
+                cls = TargetTransientCalledProcessError if will_succeed else TargetStableCalledProcessError
+                raise cls(
+                    exit_code,
+                    command,
+                    output,
+                    None,
+                )
             return output
 
     def background(self, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, as_root=False):
@@ -843,16 +853,23 @@ class TelnetConnection(SshConnectionBase):
                 if check_exit_code:
                     try:
                         exit_code = int(exit_code_text)
-                        if exit_code:
-                            message = 'Got exit code {}\nfrom: {}\nOUTPUT: {}'
-                            raise TargetStableError(message.format(exit_code, command, output))
                     except (ValueError, IndexError):
-                        logger.warning(
+                        raise ValueError(
                             'Could not get exit code for "{}",\ngot: "{}"'\
                             .format(command, exit_code_text))
+                    if exit_code:
+                        cls = TargetTransientCalledProcessError if will_succeed else TargetStableCalledProcessError
+                        raise cls(
+                            exit_code,
+                            command,
+                            output,
+                            None,
+                        )
                 return output
         except EOF:
             raise TargetNotRespondingError('Connection lost.')
+        except TargetCalledProcessError:
+            raise
         except TargetStableError as e:
             if will_succeed:
                 raise TargetTransientError(e)
@@ -1130,7 +1147,10 @@ class Gem5Connection(TelnetConnection):
         try:
             output = self._gem5_shell(command,
                                       check_exit_code=check_exit_code,
-                                      as_root=as_root)
+                                      as_root=as_root,
+                                      will_succeed=will_succeed)
+        except TargetCalledProcessError:
+            raise
         except TargetStableError as e:
             if will_succeed:
                 raise TargetTransientError(e)
@@ -1364,7 +1384,7 @@ class Gem5Connection(TelnetConnection):
             raise TargetStableError('Path to m5 binary on simulated system  is not set!')
         self._gem5_shell('{} {}'.format(self.m5_path, command))
 
-    def _gem5_shell(self, command, as_root=False, timeout=None, check_exit_code=True, sync=True):  # pylint: disable=R0912
+    def _gem5_shell(self, command, as_root=False, timeout=None, check_exit_code=True, sync=True, will_succeed=False):  # pylint: disable=R0912
         """
         Execute a command in the gem5 shell
 
@@ -1429,11 +1449,17 @@ class Gem5Connection(TelnetConnection):
                                              sync=False)
             try:
                 exit_code = int(exit_code_text.split()[0])
-                if exit_code:
-                    message = 'Got exit code {}\nfrom: {}\nOUTPUT: {}'
-                    raise TargetStableError(message.format(exit_code, command, output))
             except (ValueError, IndexError):
-                gem5_logger.warning('Could not get exit code for "{}",\ngot: "{}"'.format(command, exit_code_text))
+                raise ValueError('Could not get exit code for "{}",\ngot: "{}"'.format(command, exit_code_text))
+            else:
+                if exit_code:
+                    cls = TragetTransientCalledProcessError if will_succeed else TargetStableCalledProcessError
+                    raise cls(
+                        exit_code,
+                        command,
+                        output,
+                        None,
+                    )
 
         return output
 
