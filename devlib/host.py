@@ -22,7 +22,10 @@ from distutils.dir_util import copy_tree
 from getpass import getpass
 from pipes import quote
 
-from devlib.exception import TargetTransientError, TargetStableError
+from devlib.exception import (
+    TargetTransientError, TargetStableError,
+    TargetTransientCalledProcessError, TargetStableCalledProcessError
+)
 from devlib.utils.misc import check_output
 from devlib.connection import ConnectionBase, PopenBackgroundCommand
 
@@ -107,12 +110,13 @@ class LocalConnection(ConnectionBase):
         try:
             stdout, stderr = check_output(command, shell=True, timeout=timeout, ignore=ignore)
         except subprocess.CalledProcessError as e:
-            message = 'Got exit code {}\nfrom: {}\nOUTPUT: {}'.format(
-                e.returncode, command, e.output)
-            if will_succeed:
-                raise TargetTransientError(message)
-            else:
-                raise TargetStableError(message)
+            cls = TargetTransientCalledProcessError if will_succeed else TargetStableCalledProcessError
+            raise cls(
+                e.returncode,
+                command,
+                e.output,
+                e.stderr,
+            )
 
         # Remove the one-character prompt of sudo -S -p
         if use_sudo and stderr:

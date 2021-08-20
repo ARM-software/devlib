@@ -13,6 +13,8 @@
 # limitations under the License.
 #
 
+import subprocess
+
 class DevlibError(Exception):
     """Base class for all Devlib exceptions."""
 
@@ -66,6 +68,42 @@ class TargetStableError(TargetError, DevlibStableError):
     """Non-transient target errors that can be linked to a programming error or
     a configuration issue, and is not influenced by non-controllable parameters
     such as network issues."""
+    pass
+
+
+class TargetCalledProcessError(subprocess.CalledProcessError, TargetError):
+    """Exception raised when a command executed on the target fails."""
+    def __str__(self):
+        msg = super().__str__()
+        def decode(s):
+            try:
+                s = s.decode()
+            except AttributeError:
+                s = str(s)
+
+            return s.strip()
+
+        if self.stdout is not None and self.stderr is None:
+            out = ['OUTPUT: {}'.format(decode(self.output))]
+        else:
+            out = [
+                'STDOUT: {}'.format(decode(self.output)) if self.output is not None else '',
+                'STDERR: {}'.format(decode(self.stderr)) if self.stderr is not None else '',
+            ]
+
+        return '\n'.join((
+            msg,
+            *out,
+        ))
+
+
+class TargetStableCalledProcessError(TargetCalledProcessError, TargetStableError):
+    """Variant of :exc:`devlib.exception.TargetCalledProcessError` that indicates a stable error"""
+    pass
+
+
+class TargetTransientCalledProcessError(TargetCalledProcessError, TargetTransientError):
+    """Variant of :exc:`devlib.exception.TargetCalledProcessError` that indicates a transient error"""
     pass
 
 

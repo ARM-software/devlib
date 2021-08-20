@@ -197,7 +197,7 @@ def check_subprocess_output(process, timeout=None, ignore=None, inputtext=None):
 
     retcode = process.poll()
     if retcode and ignore != 'all' and retcode not in ignore:
-        raise subprocess.CalledProcessError(retcode, process.args, output='\n'.join([output, error]))
+        raise subprocess.CalledProcessError(retcode, process.args, output, error)
 
     return output, error
 
