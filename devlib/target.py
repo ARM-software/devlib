@@ -50,7 +50,7 @@ from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
                               TargetTransientError, KernelConfigKeyError,
-                              TargetError, HostError) # pylint: disable=redefined-builtin
+                              TargetError, HostError, TargetCalledProcessError) # pylint: disable=redefined-builtin
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
@@ -848,12 +848,44 @@ class Target(object):
 
     def write_value(self, path, value, verify=True):
         value = str(value)
-        self.execute('echo {} > {}'.format(quote(value), quote(path)), check_exit_code=False, as_root=True)
+
         if verify:
-            output = self.read_value(path)
-            if not output == value:
-                message = 'Could not set the value of {} to "{}" (read "{}")'.format(path, value, output)
+            # Check in a loop for a while since updates to sysfs files can take
+            # some time to be observed, typically when a write triggers a
+            # lengthy kernel-side request, and the read is based on some piece
+            # of state that may take some time to be updated by the write
+            # request, such as hotplugging a CPU.
+            cmd = '''
+orig=$(cat {path} 2>/dev/null || printf "")
+printf "%s" {value} > {path} || exit 10
+if [ {value} != "$orig" ]; then
+   trials=0
+   while [ "$(cat {path} 2>/dev/null)" != {value} ]; do
+       if [ $trials -ge 10 ]; then
+           cat {path}
+           exit 11
+       fi
+       sleep 0.01
+       trials=$((trials + 1))
+   done
+fi
+'''
+        else:
+            cmd = '{busybox} printf "%s" {value} > {path}'
+        cmd = cmd.format(busybox=quote(self.busybox), path=quote(path), value=quote(value))
+
+        try:
+            self.execute(cmd, check_exit_code=True, as_root=True)
+        except TargetCalledProcessError as e:
+            if e.returncode == 10:
+                raise TargetStableError('Could not write "{value}" to {path}: {e.output}'.format(
+                    value=value, path=path, e=e))
+            elif verify and e.returncode == 11:
+                out = e.output
+                message = 'Could not set the value of {} to "{}" (read "{}")'.format(path, value, out)
                 raise TargetStableError(message)
+            else:
+                raise
 
     def reset(self):
         try:
