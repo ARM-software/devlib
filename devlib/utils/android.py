@@ -576,7 +576,7 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
                           '-----\nSTDERR:\n-----\n{}\n-----'
                 raise TargetTransientError(message.format(raw_output, error))
 
-    return output + error
+    return '\n'.join(x for x in (output, error) if x)
 
 
 def adb_background_shell(conn, command,
