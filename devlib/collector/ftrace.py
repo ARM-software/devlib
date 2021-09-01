@@ -105,7 +105,6 @@ class FtraceCollector(CollectorBase):
         self.function_profile_file    = self.target.path.join(self.tracing_path, 'function_profile_enabled')
         self.marker_file              = self.target.path.join(self.tracing_path, 'trace_marker')
         self.ftrace_filter_file       = self.target.path.join(self.tracing_path, 'set_ftrace_filter')
-        self.trace_clock_file         = self.target.path.join(self.tracing_path, 'trace_clock')
         self.save_cmdlines_size_file  = self.target.path.join(self.tracing_path, 'saved_cmdlines_size')
         self.available_tracers_file  = self.target.path.join(self.tracing_path, 'available_tracers')
 
@@ -244,7 +243,6 @@ class FtraceCollector(CollectorBase):
         with contextlib.suppress(TargetStableError):
             self.target.write_value('/proc/sys/kernel/kptr_restrict', 0)
 
-        self.target.write_value(self.trace_clock_file, self.trace_clock, verify=False)
         try:
             self.target.write_value(self.save_cmdlines_size_file, self.saved_cmdlines_nr)
         except TargetStableError as e:
@@ -257,12 +255,13 @@ class FtraceCollector(CollectorBase):
                 self.logger.debug(e)
 
         self.target.execute(
-            '{} start {buffer_size} {events} {tracer} {functions}'.format(
+            '{} start {buffer_size} {clock} {events} {tracer} {functions}'.format(
                 self.target_binary,
                 events=self.event_string,
                 tracer=tracer_string,
                 functions=tracecmd_functions,
                 buffer_size='-b {}'.format(self.buffer_size) if self.buffer_size is not None else '',
+                clock='-C {}'.format(self.trace_clock) if self.trace_clock else '',
             ),
             as_root=True,
         )
