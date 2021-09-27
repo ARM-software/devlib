@@ -61,7 +61,7 @@ from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_s
 
 
 FSTAB_ENTRY_REGEX = re.compile(r'(\S+) on (.+) type (\S+) \((\S+)\)')
-ANDROID_SCREEN_STATE_REGEX = re.compile('(?:mPowerState|mScreenOn|Display Power: state)=([0-9]+|true|false|ON|OFF|DOZE)',
+ANDROID_SCREEN_STATE_REGEX = re.compile('(?:mPowerState|mScreenOn|mWakefulness|Display Power: state)=([0-9]+|true|false|ON|OFF|DOZE|Asleep|Awake)',
                                         re.IGNORECASE)
 ANDROID_SCREEN_RESOLUTION_REGEX = re.compile(r'cur=(?P<width>\d+)x(?P<height>\d+)')
 ANDROID_SCREEN_ROTATION_REGEX = re.compile(r'orientation=(?P<rotation>[0-3])')
@@ -1791,6 +1791,10 @@ class AndroidTarget(Target):
         match = ANDROID_SCREEN_STATE_REGEX.search(output)
         if match:
             if 'DOZE' in match.group(1).upper():
+                return True
+            if match.group(1) == 'Asleep':
+                return False
+            if match.group(1) == 'Awake':
                 return True
             return boolean(match.group(1))
         else:
