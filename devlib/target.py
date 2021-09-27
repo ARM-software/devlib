@@ -249,9 +249,9 @@ class Target(object):
         try:
             return KernelConfig(self.execute('zcat /proc/config.gz'))
         except TargetStableError:
-            for path in ['/boot/config', '/boot/config-$(uname -r)']:
+            for path in ['/boot/config-$({} uname -r)'.format(self.busybox), '/boot/config']:
                 try:
-                    return KernelConfig(self.execute('cat {}'.format(quote(path))))
+                    return KernelConfig(self.execute('cat {}'.format(path)))
                 except TargetStableError:
                     pass
         return KernelConfig('')
