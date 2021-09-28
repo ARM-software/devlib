@@ -22,10 +22,15 @@ class DevlibError(Exception):
 
     @property
     def message(self):
-        if self._message is not None:
-            return self._message
-        else:
+        try:
+            msg = self._message
+        except AttributeError:
+            msg = None
+
+        if msg is None:
             return str(self)
+        else:
+            return self._message
 
 
 class DevlibStableError(DevlibError):
