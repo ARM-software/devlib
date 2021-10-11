@@ -574,7 +574,7 @@ class Target(object):
             if not sources:
                 raise src_excep('No file matching source pattern: {}'.format(pattern))
 
-            if dst_path_exists(dest) and not dst_is_dir(dest):
+            if dst_paths_kind([dest]) != ['dir']:
                 raise NotADirectoryError('A folder dest is required for multiple matches but destination is a file: {}'.format(dest))
 
         # TODO: since rewrite_dst() will currently return a different path for
