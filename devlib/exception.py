@@ -164,6 +164,13 @@ class KernelConfigKeyError(KeyError, IndexError, DevlibError):
     pass
 
 
+class TooManyBackgroundCommandsError(DevlibError):
+    """
+    Exception raised when too many background commands are started at once.
+    """
+    pass
+
+
 def get_traceback(exc=None):
     """
     Returns the string with the traceback for the specifiec exc

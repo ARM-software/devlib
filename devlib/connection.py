@@ -29,8 +29,9 @@ import time
 import logging
 import select
 import fcntl
+import asyncio
 
-from devlib.utils.misc import InitCheckpoint
+from devlib.utils.misc import InitCheckpoint, memoized
 
 _KILL_TIMEOUT = 3
 
@@ -61,16 +62,127 @@ class ConnectionBase(InitCheckpoint):
     """
     Base class for all connections.
     """
+
+    _MAX_BACKGROUND_CMD = 50
+    """
+    Check for up to this amount of available background commands.
+    """
+
     def __init__(self):
         self._current_bg_cmds = WeakSet()
         self._closed = False
         self._close_lock = threading.Lock()
         self.busybox = None
+        self._bg_spawn_lock = threading.RLock()
 
     def cancel_running_command(self):
         bg_cmds = set(self._current_bg_cmds)
         for bg_cmd in bg_cmds:
             bg_cmd.cancel()
+
+    @property
+    def _bg_async_sem(self):
+        # If we have not installed busybox yet, we won't be able to poll for
+        # the max number of background commands so we return a dummy semaphore
+        # to force falling back on the blocking path.
+        if self.busybox is None:
+            return asyncio.BoundedSemaphore(0)
+        else:
+            return self._get_bg_async_sem()
+
+    # Memoization ensures we will get the same semaphore back all the time.
+    @memoized
+    def _get_bg_async_sem(self):
+        # Ensure we have a running asyncio loop, otherwise the semaphore will
+        # be useless
+        asyncio.get_running_loop()
+        return asyncio.BoundedSemaphore(self._max_async_bg)
+
+    @property
+    @memoized
+    def _max_bg(self):
+        """
+        Find the maximum number of background command that can be spawned at
+        once on this connection.
+
+        .. note:: This is done as a cached property so that it will only be
+            done on first use, leaving the opportunity to the caller to check
+            that the connection is in working order before we get here.
+        """
+        # We need busybox in order to kill the commands we spawn
+        assert self.busybox is not None
+
+        kill_list = []
+
+        # Keep a command alive for the whole duration of the probing so that we
+        # don't need to spawn a new command to kill the sleeps. Otherwise, we
+        # would end up not being able to since we reach the server's limit
+        killer_bg = self.background(
+            '{} xargs kill -9 --'.format(self.busybox),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            as_root=False,
+        )
+
+        try:
+            with killer_bg:
+                for i in range(self._MAX_BACKGROUND_CMD - 1):
+                    try:
+                        # Do not pollute the log with misleading connection
+                        # failures.
+                        logging.disable()
+                        bg = self.background(
+                            # Sleep for a year
+                            '{} sleep 31536000'.format(self.busybox),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            as_root=False,
+                        )
+                    # We reached the limit of commands to spawn
+                    except Exception:
+                        break
+                    else:
+                        kill_list.append(bg)
+                    finally:
+                        logging.disable(logging.NOTSET)
+
+                to_kill = ' '.join(
+                    # Prefix with "-" to kill the process group
+                    '-{}'.format(bg.pid)
+                    for bg in kill_list
+                )
+                killer_bg.communicate(input=to_kill.encode())
+
+        finally:
+            for bg in kill_list:
+                bg.__exit__(None, None, None)
+
+        # avoid off-by-one since range() starts from 0
+        max_ = i + 1
+
+        # Add the killer_bg command
+        max_ = i + 1
+
+        # Ensure we can always do side things requiring a channel on some
+        # connections like connecting to SFTP or running synchronously a
+        # command.
+        max_ -= 1
+        return max_
+
+    @property
+    @memoized
+    def _max_user_bg(self):
+        # Allocate half of the available background commands to the user, half
+        # for the exclusive use of _execute_async(). Partitioning is necessary
+        # to avoid deadlocks where the user would spawn a number of
+        # BackgroundCommand manually and then try to use an execute() which
+        # would require another command as well.
+        return int(self._max_bg / 2)
+
+    @property
+    @memoized
+    def _max_async_bg(self):
+        return self._max_bg - self._max_user_bg
 
     @abstractmethod
     def _close(self):

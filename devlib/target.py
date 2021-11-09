@@ -52,7 +52,8 @@ from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
                               TargetTransientError, KernelConfigKeyError,
-                              TargetError, HostError, TargetCalledProcessError) # pylint: disable=redefined-builtin
+                              TargetError, HostError, TargetCalledProcessError,
+                              TooManyBackgroundCommandsError) # pylint: disable=redefined-builtin
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
@@ -378,6 +379,9 @@ class Target(object):
         self.execute('mkdir -p {}'.format(quote(self.executables_directory)))
         self.busybox = self.install(os.path.join(PACKAGE_BIN_DIRECTORY, self.abi, 'busybox'), timeout=30)
         self.conn.busybox = self.busybox
+        # Hit the cached property early but after having checked the connection
+        # works, and after having set self.busybox
+        self.conn._max_bg
         self.platform.update_from_target(self)
         self._update_modules('connected')
         if self.platform.big_core and self.load_default_modules:
@@ -769,53 +773,76 @@ class Target(object):
     @asyn.asyncf
     @call_conn
     async def _execute_async(self, command, timeout=None, as_root=False, strip_colors=True, will_succeed=False, check_exit_code=True, force_locale='C'):
-        bg = self.background(
-            command=command,
-            as_root=as_root,
-            force_locale=force_locale,
-        )
+        sem = self.conn._bg_async_sem
 
-        def process(streams):
-            # Make sure we don't accidentally end up with "\n" if both streams
-            # are empty
-            res = b'\n'.join(x for x in streams if x).decode()
-            if strip_colors:
-                res = strip_bash_colors(res)
-            return res
+        # If there is no BackgroundCommand slot available, give control back to
+        # the event loop in case a command is ready to finish.
+        if sem.locked():
+            await asyncio.sleep(0)
 
-        def thread_f():
-            streams = (None, None)
-            excep = None
-            try:
-                with bg as _bg:
-                    streams = _bg.communicate(timeout=timeout)
-            except BaseException as e:
-                excep = e
+        # If there is no BackgroundCommand slot available, fall back on the
+        # blocking path. This ensures complete separation between the internal
+        # use of background() to provide the async API and the external uses of
+        # background()
+        if sem.locked():
+            return self._execute(
+                command,
+                timeout=timeout,
+                as_root=as_root,
+                strip_colors=strip_colors,
+                will_succeed=will_succeed,
+                check_exit_code=check_exit_code,
+                force_locale=force_locale,
+            )
+        else:
+            async with sem:
+                bg = self.background(
+                    command=command,
+                    as_root=as_root,
+                    force_locale=force_locale,
+                )
 
-            if isinstance(excep, subprocess.CalledProcessError):
-                if check_exit_code:
-                    excep = TargetStableError(excep)
-                else:
-                    streams = (excep.output, excep.stderr)
+                def process(streams):
+                    # Make sure we don't accidentally end up with "\n" if both streams
+                    # are empty
+                    res = b'\n'.join(x for x in streams if x).decode()
+                    if strip_colors:
+                        res = strip_bash_colors(res)
+                    return res
+
+                def thread_f(loop, future):
+                    streams = (None, None)
                     excep = None
+                    try:
+                        with bg as _bg:
+                            streams = _bg.communicate(timeout=timeout)
+                    except BaseException as e:
+                        excep = e
 
-            if will_succeed and isinstance(excep, TargetStableError):
-                excep = TargetTransientError(excep)
+                    if isinstance(excep, subprocess.CalledProcessError):
+                        if check_exit_code:
+                            excep = TargetStableError(excep)
+                        else:
+                            streams = (excep.output, excep.stderr)
+                            excep = None
 
-            if excep is None:
-                res = process(streams)
-                loop.call_soon_threadsafe(future.set_result, res)
-            else:
-                loop.call_soon_threadsafe(future.set_exception, excep)
+                    if will_succeed and isinstance(excep, TargetStableError):
+                        excep = TargetTransientError(excep)
 
-        loop = asyncio.get_running_loop()
-        future = asyncio.Future()
-        thread = threading.Thread(
-            target=thread_f,
-            daemon=True,
-        )
-        thread.start()
-        return await future
+                    if excep is None:
+                        res = process(streams)
+                        loop.call_soon_threadsafe(future.set_result, res)
+                    else:
+                        loop.call_soon_threadsafe(future.set_exception, excep)
+
+                future = asyncio.Future()
+                thread = threading.Thread(
+                    target=thread_f,
+                    args=(asyncio.get_running_loop(), future),
+                    daemon=True,
+                )
+                thread.start()
+                return await future
 
     @call_conn
     def _execute(self, command, timeout=None, check_exit_code=True,
@@ -835,13 +862,26 @@ class Target(object):
     @call_conn
     def background(self, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, as_root=False,
                    force_locale='C', timeout=None):
-        command = self._prepare_cmd(command, force_locale)
-        bg_cmd = self.conn.background(command, stdout, stderr, as_root)
-        if timeout is not None:
-            timer = threading.Timer(timeout, function=bg_cmd.cancel)
-            timer.daemon = True
-            timer.start()
-        return bg_cmd
+        conn = self.conn
+        # Make sure only one thread tries to spawn a background command at the
+        # same time, so the count of _current_bg_cmds is accurate.
+        with conn._bg_spawn_lock:
+            alive = list(conn._current_bg_cmds)
+            alive = [bg for bg in alive if bg.poll() is None]
+            # Since the async path self-regulates using a
+            # asyncio.BoundedSemaphore(), going over the combined max means the
+            # culprit is the user spawning too many BackgroundCommand.
+            if len(alive) >= conn._max_bg:
+                raise TooManyBackgroundCommandsError(
+                    '{} sessions allowed for one connection on this server. Modify MaxSessions parameter for OpenSSH to allow more.'.format(conn._max_bg))
+
+            command = self._prepare_cmd(command, force_locale)
+            bg_cmd = self.conn.background(command, stdout, stderr, as_root)
+            if timeout is not None:
+                timer = threading.Timer(timeout, function=bg_cmd.cancel)
+                timer.daemon = True
+                timer.start()
+            return bg_cmd
 
     def invoke(self, binary, args=None, in_directory=None, on_cpus=None,
                redirect_stderr=False, as_root=False, timeout=30):
