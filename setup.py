@@ -82,6 +82,7 @@ params = dict(
     url='https://github.com/ARM-software/devlib',
     license='Apache v2',
     maintainer='ARM Ltd.',
+    python_requires='>= 3.7',
     install_requires=[
         'python-dateutil',  # converting between UTC and local time.
         'pexpect>=3.3',  # Send/recieve to/from device
