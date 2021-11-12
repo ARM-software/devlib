@@ -31,6 +31,7 @@ import threading
 import uuid
 import xml.dom.minidom
 import copy
+import inspect
 from collections import namedtuple, defaultdict
 from contextlib import contextmanager
 from pipes import quote
@@ -56,7 +57,7 @@ from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
 from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
-from devlib.utils.misc import batch_contextmanager, tls_property, nullcontext
+from devlib.utils.misc import batch_contextmanager, tls_property, _BoundTLSProperty, nullcontext
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string, bytes_regex
 
 
@@ -337,12 +338,18 @@ class Target(object):
             self.connect()
 
     def __getstate__(self):
+        # tls_property will recreate the underlying value automatically upon
+        # access and is typically used for dynamic content that cannot be
+        # pickled or should not transmitted to another thread.
+        ignored = {
+            k
+            for k, v in inspect.getmembers(self.__class__)
+            if isinstance(v, _BoundTLSProperty)
+        }
         return {
             k: v
             for k, v in self.__dict__.items()
-            # Avoid sharing the connection instance with the original target,
-            # so that each target can live its own independent life
-            if k != '_conn'
+            if k not in ignored
         }
 
     # connection and initialization
