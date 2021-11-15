@@ -1265,7 +1265,7 @@ fi
             try:
                 mod.install(self, **params)
             except Exception as e:
-                self.logger.error('Module "{}" failed to install on target'.format(name))
+                self.logger.error('Module "{}" failed to install on target: {}'.format(name, e))
                 raise
             self._installed_modules[name] = mod
             if name not in self.modules:
