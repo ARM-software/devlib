@@ -272,7 +272,7 @@ Target
         notably paramiko + OpenSSH combination having performance issues when
         pulling big files from sysfs.
 
-.. method:: Target.execute(command [, timeout [, check_exit_code [, as_root [, strip_colors [, will_succeed [, force_locale]]]]]])
+.. method:: Target.execute(command [, timeout [, check_exit_code [, as_root [, strip_colors [, will_succeed [, force_locale, ]]]]]])
 
    Execute the specified command on the target device and return its output.
 
@@ -295,6 +295,11 @@ Target
    :param force_locale: Prepend ``LC_ALL=<force_locale>`` in front of the
       command to get predictable output that can be more safely parsed.
       If ``None``, no locale is prepended.
+
+.. method:: Target.execute_raw(command [, timeout [, check_exit_code [, as_root [, will_succeed [, force_locale, ]]]]])
+
+   Same as :meth:`Target.execute` except that it will return a ``tuple(stdout, stderr)`` of
+   bytestrings.
 
 .. method:: Target.background(command [, stdout [, stderr [, as_root, [, force_locale [, timeout]]])
 
