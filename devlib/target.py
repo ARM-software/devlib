@@ -54,7 +54,9 @@ from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
                               TargetTransientError, KernelConfigKeyError,
-                              TargetError, HostError, TargetCalledProcessError) # pylint: disable=redefined-builtin
+                              TargetError, HostError, TargetCalledProcessError,
+                              TargetStableCalledProcessError, TargetTransientCalledProcessError,
+                              ) # pylint: disable=redefined-builtin
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
@@ -887,6 +889,32 @@ class Target(object):
         return self.conn.execute(command, timeout=timeout,
                 check_exit_code=check_exit_code, as_root=as_root,
                 strip_colors=strip_colors, will_succeed=will_succeed)
+
+    @asyn.asyncf
+    @call_conn
+    async def execute_raw(self, command, *, timeout=None, check_exit_code=True,
+                as_root=False, will_succeed=False, force_locale='C'):
+        bg = self.background(
+            command=command,
+            as_root=as_root,
+            force_locale=force_locale,
+        )
+
+        # TODO: make BackgroundCommand API async-friendly and use that
+        with bg as bg:
+            try:
+                # Timeout on communicate() usually saves a thread
+                stdout, stderr = bg.communicate(timeout=timeout)
+            except subprocess.CalledProcessError as e:
+                if check_exit_code:
+                    if will_succeed:
+                        raise TargetTransientCalledProcessError(*e.args)
+                    else:
+                        raise
+                else:
+                    return (e.stdout, e.stderr)
+            else:
+                return (stdout, stderr)
 
     execute = asyn._AsyncPolymorphicFunction(
         asyn=_execute_async.asyn,
