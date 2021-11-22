@@ -1033,8 +1033,8 @@ fi
     # files
 
     @asyn.asyncf
-    async def makedirs(self, path):
-        await self.execute.asyn('mkdir -p {}'.format(quote(path)))
+    async def makedirs(self, path, as_root=False):
+        await self.execute.asyn('mkdir -p {}'.format(quote(path)), as_root=as_root)
 
     @asyn.asyncf
     async def file_exists(self, filepath):
