@@ -244,9 +244,9 @@ class Gem5SimulationPlatform(Platform):
                 screen_caps.append(f)
 
         if '{ts}' in filepath:
-            cmd = '{} date -u -Iseconds'
+            cmd = 'date -u -Iseconds'
             # pylint: disable=no-member
-            ts = self.target.execute(cmd.format(self.target.busybox)).strip()
+            ts = self.target.execute(cmd).strip()
             filepath = filepath.format(ts=ts)
 
         successful_capture = False
@@ -284,7 +284,7 @@ class Gem5SimulationPlatform(Platform):
 
         """
         # Try and avoid line wrapping as much as possible.
-        target.execute('{} stty columns 1024'.format(target.busybox))
+        target.execute('stty columns 1024')
         target.execute('reset', check_exit_code=False)
 
 # Methods that will be monkey-patched onto the target

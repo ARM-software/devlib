@@ -108,8 +108,8 @@ class Controller(object):
 
     def list_all(self):
         self.logger.debug('Listing groups for %s controller', self.kind)
-        output = self.target.execute('{} find {} -type d'\
-                .format(self.target.busybox, self.mount_point),
+        output = self.target.execute('find {} -type d'\
+                .format(self.mount_point),
                 as_root=True)
         cgroups = []
         for cg in output.splitlines():
@@ -402,8 +402,8 @@ class CgroupsModule(Module):
 
     def list_subsystems(self):
         subsystems = []
-        for line in self.target.execute('{} cat /proc/cgroups'\
-                .format(self.target.busybox), as_root=self.target.is_rooted).splitlines()[1:]:
+        for line in self.target.execute('cat /proc/cgroups',
+                as_root=self.target.is_rooted).splitlines()[1:]:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue

@@ -181,15 +181,15 @@ class Target(object):
     @property
     @memoized
     def kernel_version(self):
-        return KernelVersion(self.execute('{} uname -r -v'.format(quote(self.busybox))).strip())
+        return KernelVersion(self.execute('uname -r -v').strip())
 
     @property
     def hostid(self):
-        return int(self.execute('{} hostid'.format(self.busybox)).strip(), 16)
+        return int(self.execute('hostid').strip(), 16)
 
     @property
     def hostname(self):
-        return self.execute('{} hostname'.format(self.busybox)).strip()
+        return self.execute('hostname').strip()
 
     @property
     def os_version(self):  # pylint: disable=no-self-use
@@ -226,7 +226,7 @@ class Target(object):
     @property
     @memoized
     def number_of_nodes(self):
-        cmd = 'cd /sys/devices/system/node && {busybox} find . -maxdepth 1'.format(busybox=quote(self.busybox))
+        cmd = 'cd /sys/devices/system/node && find . -maxdepth 1'
         try:
             output = self.execute(cmd, as_root=self.is_rooted)
         except TargetStableError:
@@ -255,7 +255,7 @@ class Target(object):
         try:
             return KernelConfig(self.execute('zcat /proc/config.gz'))
         except TargetStableError:
-            for path in ['/boot/config-$({} uname -r)'.format(self.busybox), '/boot/config']:
+            for path in ['/boot/config-$(uname -r)', '/boot/config']:
                 try:
                     return KernelConfig(self.execute('cat {}'.format(path)))
                 except TargetStableError:
@@ -270,8 +270,8 @@ class Target(object):
     @property
     @memoized
     def page_size_kb(self):
-        cmd = "cat /proc/self/smaps | {0} grep KernelPageSize | {0} head -n 1 | {0} awk '{{ print $2 }}'"
-        return int(self.execute(cmd.format(self.busybox)) or 0)
+        cmd = "cat /proc/self/smaps | grep KernelPageSize | head -n 1 | awk '{ print $2 }'"
+        return int(self.execute(cmd) or 0)
 
     @property
     def shutils(self):
@@ -678,7 +678,7 @@ class Target(object):
         # Make sure to use the same shell everywhere for the path globbing,
         # ensuring consistent results no matter what is the default platform
         # shell
-        cmd = '{} sh -c {} 2>/dev/null'.format(quote(self.busybox), quote(cmd))
+        cmd = 'sh -c {} 2>/dev/null'.format(quote(cmd))
         # On some shells, match failure will make the command "return" a
         # non-zero code, even though the command was not actually called
         result = self.execute(cmd, strip_colors=False, check_exit_code=False, **kwargs)
@@ -720,7 +720,7 @@ class Target(object):
                 for source in sources:
                     async with self._xfer_cache_path(source) as device_tempfile:
                         await self.execute.asyn("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=as_root)
-                        await self.execute.asyn("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=as_root)
+                        await self.execute.asyn("chmod 0644 -- {}".format(quote(device_tempfile)), as_root=as_root)
                         do_pull([device_tempfile], dest)
         else:
             for sources, dest in mapping.items():
@@ -944,7 +944,7 @@ class Target(object):
             command = '{} {}'.format(command, args)
         if on_cpus:
             on_cpus = bitmask(on_cpus)
-            command = '{} taskset 0x{:x} {}'.format(quote(self.busybox), on_cpus, command)
+            command = 'taskset 0x{:x} {}'.format(on_cpus, command)
         if in_directory:
             command = 'cd {} && {}'.format(quote(in_directory), command)
         if redirect_stderr:
@@ -978,7 +978,7 @@ class Target(object):
             command = '{} {}'.format(command, args)
         if on_cpus:
             on_cpus = bitmask(on_cpus)
-            command = '{} taskset 0x{:x} {}'.format(quote(self.busybox), on_cpus, command)
+            command = 'taskset 0x{:x} {}'.format(on_cpus, command)
         if in_directory:
             command = 'cd {} && {}'.format(quote(in_directory), command)
         return self.background(command, as_root=as_root)
@@ -1049,8 +1049,8 @@ if [ {value} != "$orig" ]; then
 fi
 '''
         else:
-            cmd = '{busybox} printf "%s" {value} > {path}'
-        cmd = cmd.format(busybox=quote(self.busybox), path=quote(path), value=quote(value))
+            cmd = 'printf "%s" {value} > {path}'
+        cmd = cmd.format(path=quote(path), value=quote(value))
 
         try:
             await self.execute.asyn(cmd, check_exit_code=True, as_root=True)
@@ -1087,7 +1087,7 @@ fi
 
     def kill(self, pid, signal=None, as_root=False):
         signal_string = '-s {}'.format(signal) if signal else ''
-        self.execute('{} kill {} {}'.format(self.busybox, signal_string, pid), as_root=as_root)
+        self.execute('kill {} {}'.format(signal_string, pid), as_root=as_root)
 
     def killall(self, process_name, signal=None, as_root=False):
         for pid in self.get_pids_of(process_name):
@@ -1443,18 +1443,16 @@ fi
         return stdout.decode() if decode else stdout
 
     async def _extract_archive(self, path, cmd, dest=None):
-        cmd = '{} ' + cmd  # busybox
         if dest:
             extracted = dest
         else:
             extracted = self.path.dirname(path)
-        cmdtext = cmd.format(quote(self.busybox), quote(path), quote(extracted))
+        cmdtext = cmd.format(quote(path), quote(extracted))
         await self.execute.asyn(cmdtext)
         return extracted
 
     async def _extract_file(self, path, cmd, dest=None):
-        cmd = '{} ' + cmd  # busybox
-        cmdtext = cmd.format(quote(self.busybox), quote(path))
+        cmdtext = cmd.format(quote(path))
         await self.execute.asyn(cmdtext)
         extracted = self.path.splitext(path)[0]
         if dest:
@@ -1672,8 +1670,8 @@ class LinuxTarget(Target):
         try:
 
             tmpfile = await self.tempfile.asyn()
-            cmd = 'DISPLAY=:0.0 scrot {} && {} date -u -Iseconds'
-            ts = (await self.execute.asyn(cmd.format(quote(tmpfile), quote(self.busybox)))).strip()
+            cmd = 'DISPLAY=:0.0 scrot {} && date -u -Iseconds'
+            ts = (await self.execute.asyn(cmd.format(quote(tmpfile)))).strip()
             filepath = filepath.format(ts=ts)
             await self.pull.asyn(tmpfile, filepath)
             await self.remove.asyn(tmpfile)
@@ -1844,7 +1842,7 @@ class AndroidTarget(Target):
         if as_root is None:
             as_root = self.needs_su
         try:
-            command = 'cd {} && {} nohup {} &'.format(quote(self.working_directory), quote(self.busybox), command)
+            command = 'cd {} && nohup {} &'.format(quote(self.working_directory), command)
             await self.execute.asyn(command, timeout=1, as_root=as_root)
         except TimeoutError:
             pass
@@ -1932,8 +1930,8 @@ class AndroidTarget(Target):
     @asyn.asyncf
     async def capture_screen(self, filepath):
         on_device_file = self.path.join(self.working_directory, 'screen_capture.png')
-        cmd = 'screencap -p  {} && {} date -u -Iseconds'
-        ts = (await self.execute.asyn(cmd.format(quote(on_device_file), quote(self.busybox)))).strip()
+        cmd = 'screencap -p  {} && date -u -Iseconds'
+        ts = (await self.execute.asyn(cmd.format(quote(on_device_file)))).strip()
         filepath = filepath.format(ts=ts)
         await self.pull.asyn(on_device_file, filepath)
         await self.remove.asyn(on_device_file)
