@@ -379,6 +379,11 @@ class Target(object):
         self.execute('mkdir -p {}'.format(quote(self.working_directory)))
         self.execute('mkdir -p {}'.format(quote(self.executables_directory)))
         self.busybox = self.install(os.path.join(PACKAGE_BIN_DIRECTORY, self.abi, 'busybox'), timeout=30)
+        # Install busybox symlinks in the executable directory, so that we
+        # don't need to prefix commands with self.busybox as long as
+        # executables_directory is added to the PATH.
+        self.execute('{} --install -s {}'.format(quote(self.busybox), quote(self.executables_directory)))
+
         self.conn.busybox = self.busybox
         # Hit the cached property early but after having checked the connection
         # works, and after having set self.busybox
