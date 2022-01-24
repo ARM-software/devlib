@@ -74,6 +74,7 @@ class ConnectionBase(InitCheckpoint):
         self._close_lock = threading.Lock()
         self.busybox = None
         self._bg_spawn_lock = threading.RLock()
+        self.logger = logging.getLogger(self.__name__)
 
     def cancel_running_command(self):
         bg_cmds = set(self._current_bg_cmds)
@@ -109,6 +110,8 @@ class ConnectionBase(InitCheckpoint):
             done on first use, leaving the opportunity to the caller to check
             that the connection is in working order before we get here.
         """
+        self.logger.debug('Benchmarking the maximum number of parallel commands supported by the target ...')
+
         # We need busybox in order to kill the commands we spawn
         assert self.busybox is not None
 
