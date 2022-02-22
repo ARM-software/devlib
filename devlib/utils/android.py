@@ -605,27 +605,14 @@ def adb_background_shell(conn, command,
     if as_root:
         command = 'echo {} | su'.format(quote(command))
 
-    # Attach a unique UUID to the command line so it can be looked for without
-    # any ambiguity with ps
-    uuid_ = uuid.uuid4().hex
-    uuid_var = 'BACKGROUND_COMMAND_UUID={}'.format(uuid_)
-    command = "{} sh -c {}".format(uuid_var, quote(command))
+    command = 'echo $$; sh -c {}'.format(quote(command))
 
     adb_cmd = get_adb_command(device, 'shell', adb_server)
     full_command = '{} {}'.format(adb_cmd, quote(command))
     logger.debug(full_command)
     p = subprocess.Popen(full_command, stdout=stdout, stderr=stderr, stdin=subprocess.PIPE, shell=True)
 
-    # Out of band PID lookup, to avoid conflicting needs with stdout redirection
-    find_pid = '{} ps -A -o pid,args | grep {}'.format(conn.busybox, quote(uuid_var))
-    ps_out = conn.execute(find_pid)
-    pids = [
-        int(line.strip().split(' ', 1)[0])
-        for line in ps_out.splitlines()
-    ]
-    # The line we are looking for is the first one, since it was started before
-    # any look up command
-    pid = sorted(pids)[0]
+    pid = int(p.stdout.readline().strip())
     return (p, pid)
 
 def adb_kill_server(timeout=30, adb_server=None):
