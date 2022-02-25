@@ -257,6 +257,7 @@ def redirect_streams(stdout, stderr, command):
     def redirect(stream, redirection):
         if stream == subprocess.DEVNULL:
             suffix = '{}/dev/null'.format(redirection)
+            stream = subprocess.PIPE
         elif stream == subprocess.STDOUT:
             suffix = '{}&1'.format(redirection)
             # Indicate that there is nothing to monitor for stderr anymore
