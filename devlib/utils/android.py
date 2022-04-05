@@ -654,33 +654,49 @@ def adb_background_shell(conn, command,
     """Runs the specified command in a subprocess, returning the the Popen object."""
     device = conn.device
     adb_server = conn.adb_server
+    busybox = conn.busybox
 
     _check_env()
     stdout, stderr, command = redirect_streams(stdout, stderr, command)
     if as_root:
-        command = 'echo {} | su'.format(quote(command))
+        command = f'{busybox} printf "%s" {quote(command)} | su'
 
-    # Attach a unique UUID to the command line so it can be looked for without
-    # any ambiguity with ps
-    uuid_ = uuid.uuid4().hex
-    uuid_var = 'BACKGROUND_COMMAND_UUID={}'.format(uuid_)
-    command = "{} sh -c {}".format(uuid_var, quote(command))
+    def with_uuid(cmd):
+        # Attach a unique UUID to the command line so it can be looked for
+        # without any ambiguity with ps
+        uuid_ = uuid.uuid4().hex
+        # Unset the var, since not all connection types set it. This will avoid
+        # anyone depending on that value.
+        cmd = f'DEVLIB_CMD_UUID={uuid_}; unset DEVLIB_CMD_UUID; {cmd}'
+        # Ensure we have an sh -c layer so that the UUID will appear on the
+        # command line parameters of at least one command.
+        cmd = f'exec {busybox} sh -c {quote(cmd)}'
+        return (uuid_, cmd)
+
+    # Freeze the command with SIGSTOP to avoid racing with PID detection.
+    command = f"{busybox} kill -STOP $$ && exec {busybox} sh -c {quote(command)}"
+    command_uuid, command = with_uuid(command)
 
     adb_cmd = get_adb_command(device, 'shell', adb_server)
-    full_command = '{} {}'.format(adb_cmd, quote(command))
+    full_command = f'{adb_cmd} {quote(command)}'
     logger.debug(full_command)
     p = subprocess.Popen(full_command, stdout=stdout, stderr=stderr, stdin=subprocess.PIPE, shell=True)
 
     # Out of band PID lookup, to avoid conflicting needs with stdout redirection
-    find_pid = '{} ps -A -o pid,args | grep {}'.format(conn.busybox, quote(uuid_var))
-    ps_out = conn.execute(find_pid)
-    pids = [
-        int(line.strip().split(' ', 1)[0])
-        for line in ps_out.splitlines()
-    ]
-    # The line we are looking for is the first one, since it was started before
-    # any look up command
-    pid = sorted(pids)[0]
+    grep_cmd = f'{busybox} grep {quote(command_uuid)}'
+    # Find the PID and release the blocked background command with SIGCONT.
+    # We get multiple PIDs:
+    # * One from the grep command itself, but we remove it with another grep command.
+    # * One for each sh -c layer in the command itself.
+    #
+    # For each of the parent layer, we issue SIGCONT as it is harmless and
+    # avoids having to rely on PID ordering (which could be misleading if PIDs
+    # got recycled).
+    find_pid = f'''pids=$({busybox} ps -A -o pid,args | {grep_cmd} | {busybox} grep -v {quote(grep_cmd)} | {busybox} awk '{{print $1}}') && {busybox} printf "%s" "$pids" && {busybox} kill -CONT $pids'''
+    pids = conn.execute(find_pid, as_root=as_root)
+    # We choose the highest PID as the "control" PID. It actually does not
+    # really matter which one we pick, as they are all equivalent sh -c layers.
+    pid = max(map(int, pids.split()))
     return (p, pid)
 
 def adb_kill_server(timeout=30, adb_server=None):
