@@ -381,7 +381,10 @@ class Target(object):
     def get_connection(self, timeout=None):
         if self.conn_cls is None:
             raise ValueError('Connection class not specified on Target creation.')
-        return self.conn_cls(timeout=timeout, **self.connection_settings)  # pylint: disable=not-callable
+        conn = self.conn_cls(timeout=timeout, **self.connection_settings)  # pylint: disable=not-callable
+        # This allows forwarding the detected busybox for connections created in new threads.
+        conn.busybox = self.busybox
+        return conn
 
     def wait_boot_complete(self, timeout=10):
         raise NotImplementedError()
