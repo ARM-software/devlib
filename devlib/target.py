@@ -306,9 +306,11 @@ class Target(object):
                  load_default_modules=True,
                  shell_prompt=DEFAULT_SHELL_PROMPT,
                  conn_cls=None,
-                 is_container=False
+                 is_container=False,
+                 max_async=50,
                  ):
         self._async_pool = None
+        self._async_pool_size = None
         self._unused_conns = set()
 
         self._is_rooted = None
@@ -352,7 +354,7 @@ class Target(object):
         self.modules = merge_lists(*module_lists, duplicates='first')
         self._update_modules('early')
         if connect:
-            self.connect()
+            self.connect(max_async=max_async)
 
     def __getstate__(self):
         # tls_property will recreate the underlying value automatically upon
@@ -363,11 +365,24 @@ class Target(object):
             for k, v in inspect.getmembers(self.__class__)
             if isinstance(v, _BoundTLSProperty)
         }
+        ignored.update((
+            '_async_pool',
+            '_unused_conns',
+        ))
         return {
             k: v
             for k, v in self.__dict__.items()
             if k not in ignored
         }
+
+    def __setstate__(self, dct):
+        self.__dict__ = dct
+        pool_size = self._async_pool_size
+        if pool_size is None:
+            self._async_pool = None
+        else:
+            self._async_pool = ThreadPoolExecutor(pool_size)
+        self._unused_conns = set()
 
     # connection and initialization
 
@@ -433,6 +448,7 @@ class Target(object):
         max_conns = len(conns)
 
         self.logger.debug(f'Detected max number of async commands: {max_conns}')
+        self._async_pool_size = max_conns
         self._async_pool = ThreadPoolExecutor(max_conns)
 
     @asyn.asyncf
@@ -1547,6 +1563,7 @@ class LinuxTarget(Target):
                  shell_prompt=DEFAULT_SHELL_PROMPT,
                  conn_cls=SshConnection,
                  is_container=False,
+                 max_async=50,
                  ):
         super(LinuxTarget, self).__init__(connection_settings=connection_settings,
                                           platform=platform,
@@ -1557,7 +1574,8 @@ class LinuxTarget(Target):
                                           load_default_modules=load_default_modules,
                                           shell_prompt=shell_prompt,
                                           conn_cls=conn_cls,
-                                          is_container=is_container)
+                                          is_container=is_container,
+                                          max_async=max_async)
 
     def wait_boot_complete(self, timeout=10):
         pass
@@ -1752,6 +1770,7 @@ class AndroidTarget(Target):
                  conn_cls=AdbConnection,
                  package_data_directory="/data/data",
                  is_container=False,
+                 max_async=50,
                  ):
         super(AndroidTarget, self).__init__(connection_settings=connection_settings,
                                             platform=platform,
@@ -1762,7 +1781,8 @@ class AndroidTarget(Target):
                                             load_default_modules=load_default_modules,
                                             shell_prompt=shell_prompt,
                                             conn_cls=conn_cls,
-                                            is_container=is_container)
+                                            is_container=is_container,
+                                            max_async=max_async)
         self.package_data_directory = package_data_directory
         self._init_logcat_lock()
 
@@ -2823,6 +2843,7 @@ class LocalLinuxTarget(LinuxTarget):
                  shell_prompt=DEFAULT_SHELL_PROMPT,
                  conn_cls=LocalConnection,
                  is_container=False,
+                 max_async=50,
                  ):
         super(LocalLinuxTarget, self).__init__(connection_settings=connection_settings,
                                                platform=platform,
@@ -2833,7 +2854,8 @@ class LocalLinuxTarget(LinuxTarget):
                                                load_default_modules=load_default_modules,
                                                shell_prompt=shell_prompt,
                                                conn_cls=conn_cls,
-                                               is_container=is_container)
+                                               is_container=is_container,
+                                               max_async=max_async)
 
     def _resolve_paths(self):
         if self.working_directory is None:
@@ -2906,7 +2928,8 @@ class ChromeOsTarget(LinuxTarget):
                  load_default_modules=True,
                  shell_prompt=DEFAULT_SHELL_PROMPT,
                  package_data_directory="/data/data",
-                 is_container=False
+                 is_container=False,
+                 max_async=50,
                  ):
 
         self.supports_android = None
@@ -2932,7 +2955,8 @@ class ChromeOsTarget(LinuxTarget):
                                              load_default_modules=load_default_modules,
                                              shell_prompt=shell_prompt,
                                              conn_cls=SshConnection,
-                                             is_container=is_container)
+                                             is_container=is_container,
+                                             max_async=max_async)
 
         # We can't determine if the target supports android until connected to the linux host so
         # create unconditionally.
