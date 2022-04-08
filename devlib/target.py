@@ -927,8 +927,8 @@ fi
 
     # files
 
-    def makedirs(self, path):
-        self.execute('mkdir -p {}'.format(quote(path)))
+    def makedirs(self, path, as_root=False):
+        self.execute('mkdir -p {}'.format(quote(path)), as_root=as_root)
 
     def file_exists(self, filepath):
         command = 'if [ -e {} ]; then echo 1; else echo 0; fi'
