@@ -42,9 +42,10 @@ cpufreq_get_all_governors() {
 }
 
 cpufreq_trace_all_frequencies() {
-	FREQS=$($CAT /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq)
-	CPU=0; for F in $FREQS; do
-		echo "cpu_frequency_devlib:        state=$F cpu_id=$CPU" > /sys/kernel/debug/tracing/trace_marker
+	local TRACEFS=$(get_tracefs_mount_point)
+	local FREQS=$($CAT /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq)
+	local CPU=0; for F in $FREQS; do
+		printf "%s\n" "cpu_frequency_devlib: state=$F cpu_id=$CPU" > $TRACEFS/trace_marker
 		CPU=$((CPU + 1))
 	done
 }
@@ -96,10 +97,15 @@ cpuidle_wake_all_cpus() {
 # FTrace Utility Functions
 ################################################################################
 
+get_tracefs_mount_point() {
+    get_fs_mount_point tracefs || $PRINTF "%s" '/sys/kernel/debug/tracing'
+}
+
 ftrace_get_function_stats() {
-    for CPU in $(ls /sys/kernel/debug/tracing/trace_stat | sed 's/function//'); do
+    local TRACEFS=$(get_tracefs_mount_point)
+    for CPU in $(ls $TRACEFS/trace_stat | sed 's/function//'); do
         REPLACE_STRING="s/  Function/\n  Function (CPU$CPU)/"
-        $CAT /sys/kernel/debug/tracing/trace_stat/function$CPU \
+        $CAT $TRACEFS/trace_stat/function$CPU \
             | sed "$REPLACE_STRING"
     done
 }
