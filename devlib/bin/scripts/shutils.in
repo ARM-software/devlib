@@ -10,6 +10,8 @@ SED=${SED:-$BUSYBOX sed}
 CAT=${CAT:-$BUSYBOX cat}
 AWK=${AWK:-$BUSYBOX awk}
 PS=${PS:-$BUSYBOX ps}
+MOUNT=${MOUNT:-$BUSYBOX mount}
+PRINTF=${PRINTF:-$BUSYBOX printf}
 
 ################################################################################
 # CPUFrequency Utility Functions
@@ -317,6 +319,16 @@ get_android_system_id() {
 	hardware=$($BUSYBOX ip a | $BUSYBOX grep 'link/ether' | $BUSYBOX sed 's/://g' | $BUSYBOX awk '{print $2}' | $BUSYBOX tr -d '\n')
 	filesystem=$(content query --uri content://settings/secure --projection value --where "name='android_id'" | $BUSYBOX cut -f2 -d=)
 	echo "$hardware/$kernel/$filesystem"
+}
+
+get_fs_mount_point() {
+    local path=$(LC_ALL=C $MOUNT -t "$1" | $SED -n "s/$1 on \(.*\) type $1 .*/\1/p;q")
+    if [ "$path" == "" ]; then
+        return 1
+    else
+        $PRINTF "%s" "$path"
+        return 0
+    fi
 }
 
 ################################################################################
