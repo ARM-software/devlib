@@ -335,76 +335,14 @@ get_fs_mount_point() {
 # Main Function Dispatcher
 ################################################################################
 
-case $CMD in
-cpufreq_set_all_frequencies)
-    cpufreq_set_all_frequencies $*
-    ;;
-cpufreq_get_all_frequencies)
-    cpufreq_get_all_frequencies
-    ;;
-cpufreq_set_all_governors)
-    cpufreq_set_all_governors $*
-    ;;
-cpufreq_get_all_governors)
-    cpufreq_get_all_governors
-    ;;
-cpufreq_trace_all_frequencies)
-    cpufreq_trace_all_frequencies $*
-    ;;
-devfreq_set_all_frequencies)
-    devfreq_set_all_frequencies $*
-    ;;
-devfreq_get_all_frequencies)
-    devfreq_get_all_frequencies
-    ;;
-devfreq_set_all_governors)
-    devfreq_set_all_governors $*
-    ;;
-devfreq_get_all_governors)
-    devfreq_get_all_governors
-    ;;
-cpuidle_wake_all_cpus)
-    cpuidle_wake_all_cpus $*
-    ;;
-cgroups_get_attributes)
-	cgroups_get_attributes $*
-	;;
-cgroups_run_into)
-    cgroups_run_into $*
-    ;;
-cgroups_tasks_move)
-	cgroups_tasks_move $*
-	;;
-cgroups_tasks_in)
-	cgroups_tasks_in $*
-	;;
-cgroups_freezer_set_state)
-	cgroups_freezer_set_state $*
-	;;
-ftrace_get_function_stats)
-    ftrace_get_function_stats
-    ;;
-hotplug_online_all)
-	hotplug_online_all
-    ;;
-read_tree_values)
-	read_tree_values $*
-    ;;
-read_tree_tgz_b64)
-	read_tree_tgz_b64 $*
-    ;;
-get_linux_system_id)
-	get_linux_system_id $*
-    ;;
-get_android_system_id)
-	get_android_system_id $*
-    ;;
-sched_get_kernel_attributes)
-	sched_get_kernel_attributes $*
-	;;
-*)
+# Use a function instead of a subshell so "exit 1" works as expected
+_command_not_found() {
     echo "Command [$CMD] not supported"
-    exit -1
-esac
+    exit 1
+}
+# Check the command exists
+type "$CMD" 2>&1 >/dev/null || _command_not_found
+
+"$CMD" "$@"
 
 # vim: tabstop=4 shiftwidth=4
