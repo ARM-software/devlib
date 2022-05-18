@@ -1572,7 +1572,22 @@ class AndroidTarget(Target):
                                             conn_cls=conn_cls,
                                             is_container=is_container)
         self.package_data_directory = package_data_directory
+        self._init_logcat_lock()
+
+    def _init_logcat_lock(self):
         self.clear_logcat_lock = threading.Lock()
+
+    def __getstate__(self):
+        dct = super().__getstate__()
+        return {
+            k: v
+            for k, v in dct.items()
+            if k not in ('clear_logcat_lock',)
+        }
+
+    def __setstate__(self, dct):
+        self.__dict__.update(dct)
+        self._init_logcat_lock()
 
     def reset(self, fastboot=False):  # pylint: disable=arguments-differ
         try:
