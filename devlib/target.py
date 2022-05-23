@@ -1202,14 +1202,10 @@ fi
         shutils_ifile = os.path.join(PACKAGE_BIN_DIRECTORY, 'scripts', 'shutils.in')
         tmp_dir = tempfile.mkdtemp()
         shutils_ofile = os.path.join(tmp_dir, 'shutils')
-        shell_path = '/bin/sh'
-        if self.os == 'android':
-            shell_path = '/system/bin/sh'
         with open(shutils_ifile) as fh:
             lines = fh.readlines()
         with open(shutils_ofile, 'w') as ofile:
             for line in lines:
-                line = line.replace("__DEVLIB_SHELL__", shell_path)
                 line = line.replace("__DEVLIB_BUSYBOX__", self.busybox)
                 ofile.write(line)
         self._shutils = self.install(shutils_ofile)
