@@ -1218,7 +1218,7 @@ fi
 
     @call_conn
     def _execute_util(self, command, timeout=None, check_exit_code=True, as_root=False):
-        command = '{} {}'.format(self.shutils, command)
+        command = '{} sh {} {}'.format(quote(self.busybox), quote(self.shutils), command)
         return self.conn.execute(command, timeout, check_exit_code, as_root)
 
     def _extract_archive(self, path, cmd, dest=None):
