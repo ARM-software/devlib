@@ -58,7 +58,6 @@ class CpufreqModule(Module):
         super(CpufreqModule, self).__init__(target)
         self._governor_tunables = {}
 
-    @memoized
     @asyn.asyncf
     async def list_governors(self, cpu):
         """Returns a list of governors supported by the cpu."""
@@ -105,7 +104,7 @@ class CpufreqModule(Module):
             raise TargetStableError('Governor {} not supported for cpu {}'.format(governor, cpu))
         sysfile = '/sys/devices/system/cpu/{}/cpufreq/scaling_governor'.format(cpu)
         await self.target.write_value.asyn(sysfile, governor)
-        return await self.set_governor_tunables.asyn(cpu, governor, **kwargs)
+        await self.set_governor_tunables.asyn(cpu, governor, **kwargs)
 
     @asyn.asynccontextmanager
     async def use_governor(self, governor, cpus=None, **kwargs):
@@ -151,44 +150,83 @@ class CpufreqModule(Module):
         try:
             yield
         finally:
-            async def set_gov(cpu):
+            async def set_per_cpu_tunables(cpu):
                 domain, prev_gov, tunables, freq = cpus_infos[cpu]
-                await self.set_governor.asyn(cpu, prev_gov, **tunables)
+                # Per-cpu tunables are safe to set concurrently
+                await self.set_governor_tunables.asyn(cpu, prev_gov, per_cpu=True, **tunables)
                 # Special case for userspace, frequency is not seen as a tunable
                 if prev_gov == "userspace":
                     await self.set_frequency.asyn(cpu, freq)
 
-            await self.target.async_manager.concurrently(
-                set_gov(cpu)
+            per_cpu_tunables = self.target.async_manager.concurrently(
+                set_per_cpu_tunables(cpu)
                 for cpu in domains
             )
+
+            # Non-per-cpu tunables have to be set one after the other, for each
+            # governor that we had to deal with.
+            global_tunables = {
+                prev_gov: (cpu, tunables)
+                for cpu, (domain, prev_gov, tunables, freq) in cpus_infos.items()
+            }
+
+            global_tunables = self.target.async_manager.concurrently(
+                self.set_governor_tunables.asyn(cpu, gov, per_cpu=False, **tunables)
+                for gov, (cpu, tunables) in global_tunables.items()
+            )
+
+            # Set the governor first
+            await self.target.async_manager.concurrently(
+                self.set_governor.asyn(cpu, cpus_infos[cpu][1])
+                for cpu in domains
+            )
+            # And then set all the tunables concurrently. Each task has a
+            # specific and non-overlapping set of file to write.
+            await self.target.async_manager.concurrently(
+                (per_cpu_tunables, global_tunables)
+            )
+
+    @asyn.asyncf
+    async def _list_governor_tunables(self, cpu, governor=None):
+        if isinstance(cpu, int):
+            cpu = 'cpu{}'.format(cpu)
+
+        if governor is None:
+            governor = await self.get_governor.asyn(cpu)
+
+        try:
+            return self._governor_tunables[governor]
+        except KeyError:
+            for per_cpu, path in (
+                (True, '/sys/devices/system/cpu/{}/cpufreq/{}'.format(cpu, governor)),
+                # On old kernels
+                (False, '/sys/devices/system/cpu/cpufreq/{}'.format(governor)),
+            ):
+                try:
+                    tunables = await self.target.list_directory.asyn(path)
+                except TargetStableError:
+                    continue
+                else:
+                    break
+            else:
+                per_cpu = False
+                tunables = []
+
+            data = (governor, per_cpu, tunables)
+            self._governor_tunables[governor] = data
+            return data
 
     @asyn.asyncf
     async def list_governor_tunables(self, cpu):
         """Returns a list of tunables available for the governor on the specified CPU."""
-        if isinstance(cpu, int):
-            cpu = 'cpu{}'.format(cpu)
-        governor = await self.get_governor.asyn(cpu)
-        if governor not in self._governor_tunables:
-            try:
-                tunables_path = '/sys/devices/system/cpu/{}/cpufreq/{}'.format(cpu, governor)
-                self._governor_tunables[governor] = await self.target.list_directory.asyn(tunables_path)
-            except TargetStableError:  # probably an older kernel
-                try:
-                    tunables_path = '/sys/devices/system/cpu/cpufreq/{}'.format(governor)
-                    self._governor_tunables[governor] = await self.target.list_directory.asyn(tunables_path)
-                except TargetStableError:  # governor does not support tunables
-                    self._governor_tunables[governor] = []
-        return self._governor_tunables[governor]
+        _, _, tunables = await self._list_governor_tunables.asyn(cpu)
+        return tunables
 
     @asyn.asyncf
     async def get_governor_tunables(self, cpu):
         if isinstance(cpu, int):
             cpu = 'cpu{}'.format(cpu)
-        governor, tunable_list = await self.target.async_manager.concurrently((
-            self.get_governor.asyn(cpu),
-            self.list_governor_tunables.asyn(cpu)
-        ))
+        governor, _, tunable_list = await self._list_governor_tunables.asyn(cpu)
 
         write_only = set(WRITE_ONLY_TUNABLES.get(governor, []))
         tunable_list = [
@@ -211,7 +249,7 @@ class CpufreqModule(Module):
         return tunables
 
     @asyn.asyncf
-    async def set_governor_tunables(self, cpu, governor=None, **kwargs):
+    async def set_governor_tunables(self, cpu, governor=None, per_cpu=None, **kwargs):
         """
         Set tunables for the specified governor. Tunables should be specified as
         keyword arguments. Which tunables and values are valid depends on the
@@ -220,6 +258,9 @@ class CpufreqModule(Module):
         :param cpu: The cpu for which the governor will be set. ``int`` or
                     full cpu name as it appears in sysfs, e.g. ``cpu0``.
         :param governor: The name of the governor. Must be all lower case.
+        :param per_cpu: If ``None``, both per-cpu and global governor tunables
+            will be set. If ``True``, only per-CPU tunables will be set and if
+            ``False``, only global tunables will be set.
 
         The rest should be keyword parameters mapping tunable name onto the value to
         be set for it.
@@ -229,29 +270,28 @@ class CpufreqModule(Module):
                  tunable.
 
         """
+        if not kwargs:
+            return
         if isinstance(cpu, int):
             cpu = 'cpu{}'.format(cpu)
-        if governor is None:
-            governor = await self.get_governor.asyn(cpu)
-        valid_tunables = await self.list_governor_tunables.asyn(cpu)
+
+        governor, gov_per_cpu, valid_tunables = await self._list_governor_tunables.asyn(cpu, governor=governor)
         for tunable, value in kwargs.items():
             if tunable in valid_tunables:
-                path = '/sys/devices/system/cpu/{}/cpufreq/{}/{}'.format(cpu, governor, tunable)
-                try:
-                    await self.target.write_value.asyn(path, value)
-                except TargetStableError:
-                    if await self.target.file_exists.asyn(path):
-                        # File exists but we did something wrong
-                        raise
-                    # Expected file doesn't exist, try older sysfs layout.
+                if per_cpu is not None and gov_per_cpu != per_cpu:
+                    pass
+
+                if gov_per_cpu:
+                    path = '/sys/devices/system/cpu/{}/cpufreq/{}/{}'.format(cpu, governor, tunable)
+                else:
                     path = '/sys/devices/system/cpu/cpufreq/{}/{}'.format(governor, tunable)
-                    await self.target.write_value.asyn(path, value)
+
+                await self.target.write_value.asyn(path, value)
             else:
                 message = 'Unexpected tunable {} for governor {} on {}.\n'.format(tunable, governor, cpu)
                 message += 'Available tunables are: {}'.format(valid_tunables)
                 raise TargetStableError(message)
 
-    @memoized
     @asyn.asyncf
     async def list_frequencies(self, cpu):
         """Returns a sorted list of frequencies supported by the cpu or an empty list
