@@ -25,6 +25,7 @@ import itertools
 import contextlib
 import pathlib
 import os.path
+import inspect
 
 # Allow nesting asyncio loops, which is necessary for:
 # * Being able to call the blocking variant of a function from an async
@@ -209,6 +210,86 @@ class _AsyncPolymorphicFunction:
 
     def __getattr__(self, attr):
         return getattr(self.asyn, attr)
+
+
+class memoized_method:
+    """
+    Decorator to memmoize a method.
+
+    It works for:
+
+        * async methods (coroutine functions)
+        * non-async methods
+        * method already decorated with :func:`devlib.asyn.asyncf`.
+
+    .. note:: This decorator does not rely on hacks to hash unhashable data. If
+        such input is required, it will either have to be coerced to a hashable
+        first (e.g. converting a list to a tuple), or the code of
+        :func:`devlib.asyn.memoized_method` will have to be updated to do so.
+    """
+    def __init__(self, f):
+        memo = self
+
+        sig = inspect.signature(f)
+
+        def bind(self, *args, **kwargs):
+            bound = sig.bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            key = (bound.args[1:], tuple(sorted(bound.kwargs.items())))
+
+            return (key, bound.args, bound.kwargs)
+
+        def get_cache(self):
+            try:
+                cache = self.__dict__[memo.name]
+            except KeyError:
+                cache = {}
+                self.__dict__[memo.name] = cache
+            return cache
+
+
+        if inspect.iscoroutinefunction(f):
+            @functools.wraps(f)
+            async def wrapper(self, *args, **kwargs):
+                cache = get_cache(self)
+                key, args, kwargs = bind(self, *args, **kwargs)
+                try:
+                    return cache[key]
+                except KeyError:
+                    x = await f(*args, **kwargs)
+                    cache[key] = x
+                    return x
+        else:
+            @functools.wraps(f)
+            def wrapper(self, *args, **kwargs):
+                cache = get_cache(self)
+                key, args, kwargs = bind(self, *args, **kwargs)
+                try:
+                    return cache[key]
+                except KeyError:
+                    x = f(*args, **kwargs)
+                    cache[key] = x
+                    return x
+
+
+        self.f = wrapper
+        self._name = f.__name__
+
+    @property
+    def name(self):
+        return '__memoization_cache_of_' + self._name
+
+    def __call__(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
+
+    def __get__(self, obj, owner=None):
+        return self.f.__get__(obj, owner)
+
+    def __set__(self, obj, value):
+        raise RuntimeError("Cannot monkey-patch a memoized function")
+
+    def __set_name__(self, owner, name):
+        self.name = name
 
 
 def asyncf(f):

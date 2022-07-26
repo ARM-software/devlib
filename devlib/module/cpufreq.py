@@ -59,6 +59,7 @@ class CpufreqModule(Module):
         self._governor_tunables = {}
 
     @asyn.asyncf
+    @asyn.memoized_method
     async def list_governors(self, cpu):
         """Returns a list of governors supported by the cpu."""
         if isinstance(cpu, int):
@@ -293,6 +294,7 @@ class CpufreqModule(Module):
                 raise TargetStableError(message)
 
     @asyn.asyncf
+    @asyn.memoized_method
     async def list_frequencies(self, cpu):
         """Returns a sorted list of frequencies supported by the cpu or an empty list
         if not could be found."""
