@@ -30,6 +30,7 @@ import tempfile
 import time
 import uuid
 import zipfile
+import threading
 
 from collections import defaultdict
 from io import StringIO
@@ -258,7 +259,7 @@ class AdbConnection(ConnectionBase):
 
     # maintains the count of parallel active connections to a device, so that
     # adb disconnect is not invoked untill all connections are closed
-    active_connections = defaultdict(int)
+    active_connections = (threading.Lock(), defaultdict(int))
     # Track connected as root status per device
     _connected_as_root = defaultdict(lambda: None)
     default_timeout = 10
@@ -301,7 +302,10 @@ class AdbConnection(ConnectionBase):
                             'poll_period': transfer_poll_period,
                             }
         self.transfer_mgr = PopenTransferManager(self, **transfer_opts) if poll_transfers else None
-        AdbConnection.active_connections[self.device] += 1
+        lock, nr_active = AdbConnection.active_connections
+        with lock:
+            nr_active[self.device] += 1
+
         if self.adb_as_root:
             try:
                 self.adb_root(enable=True)
@@ -377,12 +381,17 @@ class AdbConnection(ConnectionBase):
         return bg_cmd
 
     def _close(self):
-        AdbConnection.active_connections[self.device] -= 1
-        if AdbConnection.active_connections[self.device] <= 0:
+        lock, nr_active = AdbConnection.active_connections
+        with lock:
+            nr_active[self.device] -= 1
+            disconnect = nr_active[self.device] <= 0
+            if disconnect:
+                del nr_active[self.device]
+
+        if disconnect:
             if self.adb_as_root:
                 self.adb_root(enable=False)
             adb_disconnect(self.device, self.adb_server)
-            del AdbConnection.active_connections[self.device]
 
     def cancel_running_command(self):
         # adbd multiplexes commands so that they don't interfer with each
@@ -391,7 +400,11 @@ class AdbConnection(ConnectionBase):
         pass
 
     def adb_root(self, enable=True):
-        if AdbConnection.active_connections[self.device] > 1:
+        lock, nr_active = AdbConnection.active_connections
+        with lock:
+            can_root = nr_active[self.device] <= 1
+
+        if not can_root:
             raise AdbRootError('Can only restart adb server if no other connection is active')
 
         cmd = 'root' if enable else 'unroot'
