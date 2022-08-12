@@ -40,7 +40,7 @@ try:
 except ImportError:
     from pipes import quote
 
-from devlib.exception import TargetTransientError, TargetStableError, HostError, TargetTransientCalledProcessError, TargetStableCalledProcessError
+from devlib.exception import TargetTransientError, TargetStableError, HostError, TargetTransientCalledProcessError, TargetStableCalledProcessError, AdbRootError
 from devlib.utils.misc import check_output, which, ABI_MAP, redirect_streams, get_subprocess
 from devlib.connection import ConnectionBase, AdbBackgroundCommand, PopenBackgroundCommand, PopenTransferManager
 
@@ -301,10 +301,17 @@ class AdbConnection(ConnectionBase):
                             'poll_period': transfer_poll_period,
                             }
         self.transfer_mgr = PopenTransferManager(self, **transfer_opts) if poll_transfers else None
-        if self.adb_as_root:
-            self.adb_root(enable=True)
-        adb_connect(self.device, adb_server=self.adb_server, attempts=connection_attempts)
         AdbConnection.active_connections[self.device] += 1
+        if self.adb_as_root:
+            try:
+                self.adb_root(enable=True)
+            # Exception will be raised if we are not the only connection
+            # active. adb_root() requires restarting the server, which is not
+            # acceptable if other connections are active and can apparently
+            # lead to commands hanging forever in some situations.
+            except AdbRootError:
+                pass
+        adb_connect(self.device, adb_server=self.adb_server, attempts=connection_attempts)
         self._setup_ls()
         self._setup_su()
 
@@ -384,6 +391,9 @@ class AdbConnection(ConnectionBase):
         pass
 
     def adb_root(self, enable=True):
+        if AdbConnection.active_connections[self.device] > 1:
+            raise AdbRootError('Can only restart adb server if no other connection is active')
+
         cmd = 'root' if enable else 'unroot'
         try:
             output = adb_command(self.device, cmd, timeout=30, adb_server=self.adb_server)
