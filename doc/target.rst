@@ -398,10 +398,16 @@ Target
        some sysfs entries silently failing to set the written value without
        returning an error code.
 
-.. method:: Target.revertable_write_value(path, value [, verify])
+.. method:: Target.revertable_write_value(path, value [, verify [, may_not_exist]])
 
    Same as :meth:`Target.write_value`, but as a context manager that will write
    back the previous value on exit.
+
+   :param may_not_exist: If the file does not exist, the context manager will
+      silently do nothing, or call ``may_not_exist`` if it is a callable. It
+      will be passed the exception, the target, the ``path``, the ``value`` and
+      ``verify``.
+   :type may_not_exist: bool or collections.abc.Callable
 
 .. method:: Target.batch_revertable_write_value(kwargs_list)
 

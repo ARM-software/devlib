@@ -999,13 +999,25 @@ class Target(object):
         return await self.read_value.asyn(path, kind=boolean)
 
     @asyn.asynccontextmanager
-    async def revertable_write_value(self, path, value, verify=True):
-        orig_value = self.read_value(path)
+    async def revertable_write_value(self, path, value, verify=True, may_not_exist=False):
         try:
-            await self.write_value.asyn(path, value, verify)
-            yield
-        finally:
-            await self.write_value.asyn(path, orig_value, verify)
+            orig_value = await self.read_value.asyn(path)
+        except (TargetStableError, FileNotFoundError) as e:
+            if may_not_exist:
+                if callable(may_not_exist):
+                    may_not_exist(e, self, path, value, verify)
+                else:
+                    self.logger.debug(f'Will not write {value} since the path cannot be read {path}: {e}')
+
+                yield
+            else:
+                raise
+        else:
+            try:
+                await self.write_value.asyn(path, value, verify)
+                yield
+            finally:
+                await self.write_value.asyn(path, orig_value, verify)
 
     def batch_revertable_write_value(self, kwargs_list):
         return batch_contextmanager(self.revertable_write_value, kwargs_list)
