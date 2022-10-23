@@ -26,7 +26,7 @@ It also handles the cgroup delegation API of systemd.
 .. code-block:: python
 
     # Necessary Imports
-    from lisa.target import Target
+    from devlib import Target
     from devlib.module.cgroups2 import RequestTree
 
     # Connecting to target device. Configure appropriately.
@@ -73,8 +73,8 @@ It also handles the cgroup delegation API of systemd.
             print(CGroup_hierarchy)
 
     '''
-    └──root/ pids@/sys/fs/cgroup/pids/system.slice/lisa-42c838fe4f0b4f518825c4e312590113.service/root
-        └──child/ pids@/sys/fs/cgroup/pids/system.slice/lisa-42c838fe4f0b4f518825c4e312590113.service/root/child
+    └──root/ pids@/sys/fs/cgroup/pids/system.slice/devlib-42c838fe4f0b4f518825c4e312590113.service/root
+        └──child/ pids@/sys/fs/cgroup/pids/system.slice/devlib-42c838fe4f0b4f518825c4e312590113.service/root/child
     '''
 
     # Setting up the RequestTree object CGroup hierarchy onto target device
@@ -295,7 +295,7 @@ def _request_delegation(target: Target):
     :rtype: int
     """
 
-    service_name = quote("lisa-" + str(uuid.uuid4().hex))
+    service_name = "devlib-" + str(uuid.uuid4().hex)
 
     try:
         target.execute(
@@ -1122,7 +1122,7 @@ class _CGroupV2Root(_CGroupV2):
 
         if _is_systemd_online(target=self.target):
             # Create the leaf CGroup directory
-            group_name = "lisa-" + str(uuid4().hex)
+            group_name = "devlib-" + str(uuid4().hex)
             full_path = self.target.path.join(self.group_path, group_name)
             self._create_directory(full_path)
 
