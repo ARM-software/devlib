@@ -61,7 +61,7 @@ from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_v
 from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
 from devlib.utils.misc import batch_contextmanager, tls_property, _BoundTLSProperty, nullcontext
-from devlib.utils.misc import strip_bash_colors
+from devlib.utils.misc import strip_bash_colors, safe_extract
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string, bytes_regex
 import devlib.utils.asyn as asyn
 
@@ -827,7 +827,7 @@ class Target(object):
             await self.pull.asyn(tar_file_name, tmpfile)
             # Decompress
             with tarfile.open(tmpfile, 'r') as f:
-                f.extractall(outdir)
+                safe_extract(f, outdir)
             os.remove(tmpfile)
 
     # execution
