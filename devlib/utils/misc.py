@@ -991,3 +991,26 @@ def groupby_value(dct):
         tuple(map(itemgetter(0), _items)): v
         for v, _items in groupby(items, key=key)
     }
+
+
+def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+    """
+    A wrapper around TarFile.extract all to mitigate CVE-2007-4995
+    (see https://www.trellix.com/en-us/about/newsroom/stories/research/tarfile-exploiting-the-world.html)
+    """
+
+    for member in tar.getmembers():
+        member_path = os.path.join(path, member.name)
+        if not _is_within_directory(path, member_path):
+            raise Exception("Attempted Path Traversal in Tar File")
+
+    tar.extractall(path, members, numeric_owner=numeric_owner)
+
+def _is_within_directory(directory, target):
+
+    abs_directory = os.path.abspath(directory)
+    abs_target = os.path.abspath(target)
+
+    prefix = os.path.commonprefix([abs_directory, abs_target])
+
+    return prefix == abs_directory
