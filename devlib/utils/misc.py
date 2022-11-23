@@ -47,11 +47,7 @@ try:
 except AttributeError:
     from contextlib2 import ExitStack
 
-try:
-    from shlex import quote
-except ImportError:
-    from pipes import quote
-
+from shlex import quote
 from past.builtins import basestring
 
 # pylint: disable=redefined-builtin
@@ -462,7 +458,7 @@ def escape_quotes(text):
     """
     Escape quotes, and escaped quotes, in the specified text.
 
-    .. note:: :func:`pipes.quote` should be favored where possible.
+    .. note:: :func:`shlex.quote` should be favored where possible.
     """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\'', '\\\'').replace('\"', '\\\"')
 
@@ -471,7 +467,7 @@ def escape_single_quotes(text):
     """
     Escape single quotes, and escaped single quotes, in the specified text.
 
-    .. note:: :func:`pipes.quote` should be favored where possible.
+    .. note:: :func:`shlex.quote` should be favored where possible.
     """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\'', '\'\\\'\'')
 
@@ -480,7 +476,7 @@ def escape_double_quotes(text):
     """
     Escape double quotes, and escaped double quotes, in the specified text.
 
-    .. note:: :func:`pipes.quote` should be favored where possible.
+    .. note:: :func:`shlex.quote` should be favored where possible.
     """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\"', '\\\"')
 
@@ -489,7 +485,7 @@ def escape_spaces(text):
     """
     Escape spaces in the specified text
 
-    .. note:: :func:`pipes.quote` should be favored where possible.
+    .. note:: :func:`shlex.quote` should be favored where possible.
     """
     return text.replace(' ', '\\ ')
 

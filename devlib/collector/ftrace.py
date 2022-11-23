@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 import contextlib
-from pipes import quote
+from shlex import quote
 
 from devlib.collector import (CollectorBase, CollectorOutput,
                               CollectorOutputEntry)

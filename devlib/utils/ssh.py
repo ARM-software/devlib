@@ -32,8 +32,8 @@ import weakref
 import select
 import copy
 import functools
-from pipes import quote
 from future.utils import raise_from
+from shlex import quote
 
 from paramiko.client import SSHClient, AutoAddPolicy, RejectPolicy
 import paramiko.ssh_exception
