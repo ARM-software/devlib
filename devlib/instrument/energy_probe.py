@@ -19,7 +19,7 @@ import tempfile
 import struct
 import subprocess
 import sys
-from pipes import quote
+from shlex import quote
 
 from devlib.instrument import Instrument, CONTINUOUS, MeasurementsCsv
 from devlib.exception import HostError

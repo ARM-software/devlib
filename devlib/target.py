@@ -36,10 +36,10 @@ import inspect
 import itertools
 from collections import namedtuple, defaultdict
 from contextlib import contextmanager
-from pipes import quote
 from past.builtins import long
 from past.types import basestring
 from numbers import Number
+from shlex import quote
 try:
     from collections.abc import Mapping
 except ImportError:
