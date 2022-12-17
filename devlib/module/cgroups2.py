@@ -26,17 +26,17 @@ It also handles the cgroup delegation API of systemd.
 .. code-block:: python
 
     # Necessary Imports
-    from devlib import Target
+    from devlib import LinuxTarget
     from devlib.module.cgroups2 import RequestTree
 
     # Connecting to target device. Configure appropriately.
 
-    my_target = Target(name="target",
-                        host="127.0.0.1",
-                        port="0000",
-                        username="root",
-                        password="root",
-                        kind="linux")
+    my_target = LinuxTarget(connection_settings={
+                        "host":"127.0.0.1",
+                        "port":"0000",
+                        "username":"root",
+                        "password":"root"
+                        })
 
     # Instantiating the RequestTree object,
     # representing a hierarchical CGroup structure consisting
@@ -104,7 +104,7 @@ from shlex import quote
 from typing import Dict, Set, List, Union, Any
 from uuid import uuid4
 
-from devlib import Target
+from devlib import LinuxTarget
 from devlib.exception import (
     TargetStableCalledProcessError,
     TargetStableError,
@@ -113,7 +113,7 @@ from devlib.target import FstabEntry
 from devlib.utils.misc import memoized
 
 
-def _is_systemd_online(target: Target):
+def _is_systemd_online(target: LinuxTarget):
     """
     Determines if systemd is activated on the target system.
 
@@ -132,7 +132,7 @@ def _is_systemd_online(target: Target):
         return True
 
 
-def _read_lines(target: Target, path: str):
+def _read_lines(target: LinuxTarget, path: str):
     """
     Reads the lines of a file stored on the target device.
 
@@ -228,13 +228,17 @@ def _add_controller_mounts(
     return {
         controller: {**config, "mount_point": path if path is not None else config}
         for (controller, config, path) in (
-            (controller, config, _infer_mount(controller=controller,configuration=config))
+            (
+                controller,
+                config,
+                _infer_mount(controller=controller, configuration=config),
+            )
             for (controller, config) in controllers.items()
         )
     }
 
 
-def _get_cgroup_controllers(target: Target):
+def _get_cgroup_controllers(target: LinuxTarget):
     """
     Returns the CGroup controllers that are currently enabled on the target device, alongside their appropriate configurations.
 
@@ -287,7 +291,7 @@ def _get_cgroup_controllers(target: Target):
 
 
 @contextmanager
-def _request_delegation(target: Target):
+def _request_delegation(target: LinuxTarget):
     """
     Requests systemd to delegate a subtree CGroup hierarchy to our transient service unit.
 
@@ -322,7 +326,7 @@ def _request_delegation(target: Target):
 
 
 @contextmanager
-def _mount_v2_controllers(target: Target):
+def _mount_v2_controllers(target: LinuxTarget):
     """
     Mounts the V2 unified CGroup controller hierarchy.
 
@@ -331,22 +335,27 @@ def _mount_v2_controllers(target: Target):
 
     :yield: The path to the root of the mounted V2 controller hierarchy.
     :rtype: str
+    
+    :raises TargetStableError: Occurs in the case where the root directory of the requested CGroup V2 Controller hierarchy 
+        is unable to be created up on the target system.
     """
 
+    path = target.tempfile()
+    
     try:
-        path = target.execute(
-            "{busybox} mktemp -d".format(busybox=quote(target.busybox)), as_root=True
-        ).strip()
-
+        target.makedirs(path, as_root=True)
+    except TargetStableCalledProcessError:
+        raise TargetStableError("Un-able to create the root directory of the requested CGroup V2 hierarchy")
+        
+        
+    try:
         target.execute(
             "{busybox} mount -t cgroup2 none {path}".format(
                 busybox=quote(target.busybox), path=quote(path)
             ),
             as_root=True,
         )
-
         yield path
-
     finally:
         target.execute(
             "{busybox} umount {path} && {busybox} rmdir -- {path}".format(
@@ -358,7 +367,7 @@ def _mount_v2_controllers(target: Target):
 
 
 @contextmanager
-def _mount_v1_controllers(target: Target, controllers: Set[str]):
+def _mount_v1_controllers(target: LinuxTarget, controllers: Set[str]):
     """
     Mounts the V1 split CGroup controller hierarchies.
 
@@ -370,18 +379,24 @@ def _mount_v1_controllers(target: Target, controllers: Set[str]):
 
     :yield: A dictionary mapping CGroup controller names to the paths that they're currently mounted at.
     :rtype: Dict[str,str]
+    
+    :raises TargetStableError: Occurs in the case where the root directory of a requested CGroup V1 Controller hierarchy 
+        is unable to be created up on the target system.
     """
 
     # Internal helper function which mounts a single V1 controller hierarchy and returns
     # its mount path.
     @contextmanager
     def _mount_controller(controller):
-        try:
-            path = target.execute(
-                "{busybox} mktemp -d".format(busybox=quote(target.busybox)),
-                as_root=True,
-            ).strip()
 
+        path = target.tempfile()
+        
+        try:
+            target.makedirs(path, as_root=True)
+        except TargetStableCalledProcessError as err:
+            raise TargetStableError("Un-able to create the root directory of the {controller} CGroup V1 hierarchy".format(controller = controller))
+
+        try:
             target.execute(
                 "{busybox} mount -t cgroup -o {controller} none {path}".format(
                     busybox=quote(target.busybox),
@@ -389,6 +404,7 @@ def _mount_v1_controllers(target: Target, controllers: Set[str]):
                     path=quote(path),
                 ),
             )
+
             yield path
 
         finally:
@@ -459,7 +475,7 @@ class _CGroupBase(ABC):
         name: str,
         parent_path: str,
         active_controllers: Dict[str, Dict[str, str]],
-        target: Target,
+        target: LinuxTarget,
     ):
         self.name = name
         self.active_controllers = active_controllers
@@ -551,8 +567,9 @@ class _CGroupBase(ABC):
                 path=self.target.path.join(self.group_path, "cgroup.procs"),
                 target=self.target,
             )
-        except TargetStableCalledProcessError:
+        except TargetStableError:
             self._set_controller_attribute("cgroup", "procs", pid)
+        
         else:
             if str(pid) not in member_processes:
                 self._set_controller_attribute("cgroup", "procs", pid)
@@ -648,7 +665,7 @@ class _CGroupV2(_CGroupBase):
         active_controllers: Dict[str, Dict[str, str]],
         subtree_controllers: set,
         is_threaded: bool,
-        target: Target,
+        target: LinuxTarget,
     ):
 
         super().__init__(
@@ -705,7 +722,7 @@ class _CGroupV2(_CGroupBase):
                 self._set_controller_attribute(
                     "cgroup", "type", "threaded", verify=True
                 )
-            except TargetStableCalledProcessError:
+            except TargetStableError:
                 raise TargetStableError(
                     "Domain CGroup controllers are enabled within a threaded CGroup subtree. Ensure only threaded controllers are enabled in threaded CGroups."
                 )
@@ -822,7 +839,7 @@ class _CGroupV2Root(_CGroupV2):
         }
 
     @classmethod
-    def _get_delegated_sub_path(cls, delegated_pid: int, target: Target):
+    def _get_delegated_sub_path(cls, delegated_pid: int, target: LinuxTarget):
         """
         Returns the relative sub-path the delegated root of the V2 hierarchy is mounted on, via the parsing
         of the /proc/<PID>/cgroup file of the delegated process associated with ``delegated_pid``.
@@ -939,7 +956,7 @@ class _CGroupV2Root(_CGroupV2):
     @contextmanager
     def _systemd_offline_mount(
         cls,
-        target: Target,
+        target: LinuxTarget,
         all_controllers: Dict[str, Dict[str, Union[str, int]]],
         requested_controllers: Set[str],
     ):
@@ -976,7 +993,7 @@ class _CGroupV2Root(_CGroupV2):
     @contextmanager
     def _systemd_online_setup(
         cls,
-        target: Target,
+        target: LinuxTarget,
         all_controllers: Dict[str, Dict[str, int]],
         requested_controllers: Set[str],
     ):
@@ -1031,7 +1048,7 @@ class _CGroupV2Root(_CGroupV2):
 
     @classmethod
     @contextmanager
-    def _mount_filesystem(cls, target: Target, requested_controllers: Set[str]):
+    def _mount_filesystem(cls, target: LinuxTarget, requested_controllers: Set[str]):
         """
         Mounts/Sets-up a V2 hierarchy on the target device, covering contexts where
         systemd is both present and absent.
@@ -1073,7 +1090,7 @@ class _CGroupV2Root(_CGroupV2):
         self,
         mount_point: str,
         subtree_controllers: set,
-        target: Target,
+        target: LinuxTarget,
     ):
 
         super().__init__(
@@ -1250,9 +1267,9 @@ class _CGroupV1Root(_CGroupV1):
     @classmethod
     def _get_delegated_paths(
         cls,
-        controllers: Dict[str, Dict[str,Union[str, int]]],
+        controllers: Dict[str, Dict[str, Union[str, int]]],
         delegated_pid: int,
-        target: Target,
+        target: LinuxTarget,
     ):
         """
         Returns the relative sub-paths the delegated roots of the V1 hierarchies, via the parsing
@@ -1322,7 +1339,7 @@ class _CGroupV1Root(_CGroupV1):
         cls,
         requested_controllers: Set[str],
         all_controllers: Dict[str, Dict[str, Union[str, int]]],
-        target: Target,
+        target: LinuxTarget,
     ):
         """
         Manually mounts the V1 split hierarchy on the target device. Occurs in the absence of systemd.
@@ -1355,7 +1372,9 @@ class _CGroupV1Root(_CGroupV1):
             yield mounted
 
     @classmethod
-    def _get_available_v1_controllers(cls, controllers: Dict[str, Dict[str, Union[int,str]]]):
+    def _get_available_v1_controllers(
+        cls, controllers: Dict[str, Dict[str, Union[int, str]]]
+    ):
 
         unused_controllers = {
             controller: configuration
@@ -1372,7 +1391,7 @@ class _CGroupV1Root(_CGroupV1):
     @contextmanager
     def _systemd_online_setup(
         cls,
-        target: Target,
+        target: LinuxTarget,
         requested_controllers: Set[str],
         all_controllers: Dict[str, Dict[str, str]],
     ):
@@ -1409,7 +1428,7 @@ class _CGroupV1Root(_CGroupV1):
 
     @classmethod
     @contextmanager
-    def _mount_filesystem(cls, target: Target, requested_controllers: Set[str]):
+    def _mount_filesystem(cls, target: LinuxTarget, requested_controllers: Set[str]):
         """
         A context manager which Mounts/Sets-up a V1 split hierarchy on the target device, covering contexts where
         systemd is both present and absent. This context manager Mounts/Sets-up a split V1 hierarchy (if possible)
@@ -1447,7 +1466,7 @@ class _CGroupV1Root(_CGroupV1):
             with cm as controllers:
                 yield controllers
 
-    def __init__(self, mount_point: str, target: Target):
+    def __init__(self, mount_point: str, target: LinuxTarget):
 
         super().__init__(
             # Root name is null. Isn't required.
@@ -1479,7 +1498,7 @@ class _TreeBase(ABC):
 
     :param name: The name assigned to the tree node.
     :type name: str
-    
+
     :param is_threaded: Whether the node is threaded or not.
     :type is_threaded: bool
     """
@@ -1592,8 +1611,8 @@ class RequestTree(_TreeBase):
         their respective to be assigned values, , defaults to ``None``.
     :type controllers: Dict[str, Dict[str, Union[str,int]]], optional
 
-    :param is_threaded: defines whether the object will represent a CGroup capable of managing threads, defaults to ``False``.
-    :type is_threaded: bool, optional
+    :param threaded: defines whether the object will represent a CGroup capable of managing threads, defaults to ``False``.
+    :type threaded: bool, optional
     """
 
     def __init__(
@@ -1648,7 +1667,7 @@ class RequestTree(_TreeBase):
         return list(self.children)
 
     @contextmanager
-    def setup_hierarchy(self, version: int, target: Target):
+    def setup_hierarchy(self, version: int, target: LinuxTarget):
         """
         A context manager which processes the user defined hierarchy and sets-up said hierarchy on the ``target`` device.
         Uses an internal exit stack to the handle the entering and safe exiting of the lower level
