@@ -18,7 +18,6 @@
 Miscellaneous functions that don't fit anywhere else.
 
 """
-from __future__ import division
 from contextlib import contextmanager
 from functools import partial, reduce, wraps
 from itertools import groupby
