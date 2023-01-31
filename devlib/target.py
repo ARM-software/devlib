@@ -344,6 +344,7 @@ class Target(object):
         self._cache = {}
         self._shutils = None
         self._file_transfer_cache = None
+        self._max_async = max_async
         self.busybox = None
 
         if load_default_modules:
@@ -387,7 +388,7 @@ class Target(object):
     # connection and initialization
 
     @asyn.asyncf
-    async def connect(self, timeout=None, check_boot_completed=True, max_async=50):
+    async def connect(self, timeout=None, check_boot_completed=True, max_async=None):
         self.platform.init_target_connection(self)
         # Forcefully set the thread-local value for the connection, with the
         # timeout we want
@@ -400,7 +401,7 @@ class Target(object):
         self.execute('mkdir -p {}'.format(quote(self.executables_directory)))
         self.busybox = self.install(os.path.join(PACKAGE_BIN_DIRECTORY, self.abi, 'busybox'), timeout=30)
         self.conn.busybox = self.busybox
-        self._detect_max_async(max_async)
+        self._detect_max_async(max_async or self._max_async)
         self.platform.update_from_target(self)
         self._update_modules('connected')
         if self.platform.big_core and self.load_default_modules:
@@ -1824,7 +1825,7 @@ class AndroidTarget(Target):
             raise TargetStableError('Connected but Android did not fully boot.')
 
     @asyn.asyncf
-    async def connect(self, timeout=30, check_boot_completed=True, max_async=50):  # pylint: disable=arguments-differ
+    async def connect(self, timeout=30, check_boot_completed=True, max_async=None):  # pylint: disable=arguments-differ
         device = self.connection_settings.get('device')
         await super(AndroidTarget, self).connect.asyn(
             timeout=timeout,
@@ -2998,7 +2999,7 @@ class ChromeOsTarget(LinuxTarget):
             else:
                 raise
 
-    def connect(self, timeout=30, check_boot_completed=True, max_async=50):
+    def connect(self, timeout=30, check_boot_completed=True, max_async=None):
         super(ChromeOsTarget, self).connect(
             timeout=timeout,
             check_boot_completed=check_boot_completed,
