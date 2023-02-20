@@ -406,9 +406,6 @@ class SshConnection(SshConnectionBase):
             channel = transport.open_session()
             return channel
 
-    def _get_progress_cb(self):
-        return self.transfer_mgr.progress_cb if self.transfer_mgr is not None else None
-
     # Limit the number of opened channels to a low number, since some servers
     # will reject more connections request. For OpenSSH, this is controlled by
     # the MaxSessions config.
@@ -430,10 +427,11 @@ class SshConnection(SshConnectionBase):
 
     @functools.lru_cache()
     def _get_scp(self, timeout):
-        return SCPClient(self.client.get_transport(), socket_timeout=timeout, progress=self._get_progress_cb())
+        cb = lambda _, to_transfer, transferred: self.transfer_mgr.progress_cb(to_transfer, transferred)
+        return SCPClient(self.client.get_transport(), socket_timeout=timeout, progress=cb)
 
     def _push_file(self, sftp, src, dst):
-        sftp.put(src, dst, callback=self._get_progress_cb())
+        sftp.put(src, dst, callback=self.transfer_mgr.progress_cb)
 
     @classmethod
     def _path_exists(cls, sftp, path):
@@ -463,7 +461,7 @@ class SshConnection(SshConnectionBase):
         push(sftp, src, dst)
 
     def _pull_file(self, sftp, src, dst):
-        sftp.get(src, dst, callback=self._get_progress_cb())
+        sftp.get(src, dst, callback=self.transfer_mgr.progress_cb)
 
     def _pull_folder(self, sftp, src, dst):
         os.makedirs(dst)

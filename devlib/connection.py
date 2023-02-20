@@ -717,12 +717,8 @@ class SSHTransferManager(TransferManagerBase):
                 else:
                     raise e
 
-    def progress_cb(self, *args):
+    def progress_cb(self, to_transfer, transferred):
         if self.transfer_started.is_set():
             self.progressed = True
-            if len(args) == 3:  # For SCPClient callbacks
-                self.transferred = args[2]
-                self.to_transfer = args[1]
-            elif len(args) == 2:  # For SFTPClient callbacks
-                self.transferred = args[0]
-                self.to_transfer = args[1]
+            self.transferred = transferred
+            self.to_transfer = to_transfer
