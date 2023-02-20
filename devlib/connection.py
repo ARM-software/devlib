@@ -574,7 +574,6 @@ class TransferManagerBase(ABC):
             )
         else:
             return os.stat(dest).st_size
-        return 0
 
     def _push_dest_size(self, dest):
         cmd = '{} du -s {}'.format(quote(self.conn.busybox), quote(dest))
