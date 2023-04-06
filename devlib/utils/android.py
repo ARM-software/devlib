@@ -368,7 +368,6 @@ class AdbConnection(ConnectionBase):
         if as_root and self.connected_as_root:
             as_root = False
         bg_cmd = self._background(command, stdout, stderr, as_root)
-        self._current_bg_cmds.add(bg_cmd)
         return bg_cmd
 
     def _background(self, command, stdout, stderr, as_root):

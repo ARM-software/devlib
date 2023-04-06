@@ -142,7 +142,6 @@ class LocalConnection(ConnectionBase):
             preexec_fn=preexec_fn,
         )
         bg_cmd = PopenBackgroundCommand(self, popen)
-        self._current_bg_cmds.add(bg_cmd)
         return bg_cmd
 
     def _close(self):
