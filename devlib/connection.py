@@ -120,6 +120,10 @@ class BackgroundCommand(ABC):
     Instances of this class can be used as context managers, with the same
     semantic as :class:`subprocess.Popen`.
     """
+
+    def __init__(self, conn):
+        self.conn = conn
+
     @abstractmethod
     def send_signal(self, sig):
         """
@@ -235,7 +239,8 @@ class PopenBackgroundCommand(BackgroundCommand):
     :class:`subprocess.Popen`-based background command.
     """
 
-    def __init__(self, popen):
+    def __init__(self, conn, popen):
+        super().__init__(conn=conn)
         self.popen = popen
 
     def send_signal(self, sig):
@@ -291,9 +296,9 @@ class ParamikoBackgroundCommand(BackgroundCommand):
     :mod:`paramiko`-based background command.
     """
     def __init__(self, conn, chan, pid, as_root, cmd, stdin, stdout, stderr, redirect_thread):
+        super().__init__(conn=conn)
         self.chan = chan
         self.as_root = as_root
-        self.conn = conn
         self._pid = pid
         self._stdin = stdin
         self._stdout = stdout
@@ -454,7 +459,7 @@ class AdbBackgroundCommand(BackgroundCommand):
     """
 
     def __init__(self, conn, adb_popen, pid, as_root):
-        self.conn = conn
+        super().__init__(conn=conn)
         self.as_root = as_root
         self.adb_popen = adb_popen
         self._pid = pid
