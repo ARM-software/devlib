@@ -66,6 +66,7 @@ class ConnectionBase(InitCheckpoint):
         self._closed = False
         self._close_lock = threading.Lock()
         self.busybox = None
+        self.logger = logging.getLogger('Connection')
 
     def cancel_running_command(self):
         bg_cmds = set(self._current_bg_cmds)
@@ -83,11 +84,21 @@ class ConnectionBase(InitCheckpoint):
         """
 
     def close(self):
+
+        def finish_bg():
+            bg_cmds = set(self._current_bg_cmds)
+            n = len(bg_cmds)
+            if n:
+                self.logger.debug(f'Canceling {n} background commands before closing connection')
+            for bg_cmd in bg_cmds:
+                bg_cmd.cancel()
+
         # Locking the closing allows any thread to safely call close() as long
         # as the connection can be closed from a thread that is not the one it
         # started its life in.
         with self._close_lock:
             if not self._closed:
+                finish_bg()
                 self._close()
                 self._closed = True
 
