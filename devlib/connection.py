@@ -123,6 +123,19 @@ class BackgroundCommand(ABC):
 
     def __init__(self, conn):
         self.conn = conn
+
+        # Poll currently opened background commands on that connection to make
+        # them deregister themselves if they are completed. This avoids
+        # accumulating terminated commands and therefore leaking associated
+        # resources if the user is not careful and does not use the context
+        # manager API.
+        for bg_cmd in set(conn._current_bg_cmds):
+            try:
+                bg_cmd.poll()
+            # We don't want anything to fail here because of another command
+            except Exception:
+                pass
+
         conn._current_bg_cmds.add(self)
 
     def _deregister(self):
