@@ -696,9 +696,6 @@ class SshConnection(SshConnectionBase):
     def _close(self):
         logger.debug('Logging out {}@{}'.format(self.username, self.host))
         with _handle_paramiko_exceptions():
-            bg_cmds = set(self._current_bg_cmds)
-            for bg_cmd in bg_cmds:
-                bg_cmd.close()
             self.client.close()
 
     def _execute_command(self, command, as_root, log, timeout, executor):
