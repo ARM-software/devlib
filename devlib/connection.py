@@ -170,7 +170,7 @@ class BackgroundCommand(ABC):
         :type signal: signal.Signals
         """
         try:
-            self._send_signal(signal.SIGKILL)
+            self._send_signal(sig)
         finally:
             # Deregister if the command has finished
             self.poll()
