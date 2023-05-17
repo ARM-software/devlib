@@ -170,7 +170,7 @@ class BackgroundCommand(ABC):
         :type signal: signal.Signals
         """
         try:
-            self._send_signal(signal.SIGKILL)
+            return self._send_signal(signal.SIGKILL)
         finally:
             # Deregister if the command has finished
             self.poll()
@@ -188,7 +188,7 @@ class BackgroundCommand(ABC):
         """
         try:
             if self.poll() is None:
-                self._cancel(kill_timeout=kill_timeout)
+                return self._cancel(kill_timeout=kill_timeout)
         finally:
             self._deregister()
 
@@ -208,7 +208,7 @@ class BackgroundCommand(ABC):
         Block until the background command completes, and return its exit code.
         """
         try:
-            self._wait()
+            return self._wait()
         finally:
             self._deregister()
 
