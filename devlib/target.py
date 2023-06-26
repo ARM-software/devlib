@@ -21,6 +21,7 @@ import functools
 import gzip
 import glob
 import os
+from operator import itemgetter
 import re
 import time
 import logging
@@ -48,7 +49,7 @@ from enum import Enum
 from concurrent.futures import ThreadPoolExecutor
 
 from devlib.host import LocalConnection, PACKAGE_BIN_DIRECTORY
-from devlib.module import get_module
+from devlib.module import get_module, Module
 from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
@@ -338,7 +339,6 @@ class Target(object):
         self.connection_settings['platform'] = self.platform
         self.working_directory = working_directory
         self.executables_directory = executables_directory
-        self.modules = modules or []
         self.load_default_modules = load_default_modules
         self.shell_prompt = bytes_regex(shell_prompt)
         self.conn_cls = conn_cls
@@ -352,12 +352,73 @@ class Target(object):
         self._max_async = max_async
         self.busybox = None
 
-        if load_default_modules:
-            module_lists = [self.default_modules]
-        else:
-            module_lists = []
-        module_lists += [self.modules, self.platform.modules]
-        self.modules = merge_lists(*module_lists, duplicates='first')
+        def normalize_mod_spec(spec):
+            if isinstance(spec, str):
+                return (spec, {})
+            else:
+                [(name, params)] = spec.items()
+                return (name, params)
+
+        modules = sorted(
+            map(
+                normalize_mod_spec,
+                itertools.chain(
+                    self.default_modules if load_default_modules else [],
+                    modules or [],
+                    self.platform.modules or [],
+                )
+            ),
+            key=itemgetter(0),
+        )
+
+        # Ensure that we did not ask for the same module but different
+        # configurations. Empty configurations are ignored, so any
+        # user-provided conf will win against an empty conf.
+        def elect(name, specs):
+            specs = list(specs)
+
+            confs = set(
+                tuple(sorted(params.items()))
+                for _, params in specs
+                if params
+            )
+            if len(confs) > 1:
+                raise ValueError(f'Attempted to load the module "{name}" with multiple different configuration')
+            else:
+                if any(
+                    params is None
+                    for _, params in specs
+                ):
+                    params = None
+                else:
+                    params = dict(confs.pop()) if confs else {}
+
+                return (name, params)
+
+        modules = dict(itertools.starmap(
+            elect,
+            itertools.groupby(modules, key=itemgetter(0))
+        ))
+
+        def get_kind(name):
+            return get_module(name).kind or ''
+
+        def kind_conflict(kind, names):
+            if kind:
+                raise ValueError(f'Cannot enable multiple modules sharing the same kind "{kind}": {sorted(names)}')
+
+        list(itertools.starmap(
+            kind_conflict,
+            itertools.groupby(
+                sorted(
+                    modules.keys(),
+                    key=get_kind
+                ),
+                key=get_kind
+            )
+        ))
+        self._modules = modules
+
         self._update_modules('early')
         if connect:
             self.connect(max_async=max_async)
@@ -409,8 +470,6 @@ class Target(object):
         self._detect_max_async(max_async or self._max_async)
         self.platform.update_from_target(self)
         self._update_modules('connected')
-        if self.platform.big_core and self.load_default_modules:
-            self._install_module(get_module('bl'))
 
     def _detect_max_async(self, max_async):
         self.logger.debug('Detecting max number of async commands ...')
@@ -1290,7 +1349,13 @@ fi
         return self._installed_binaries.get(name, name)
 
     def has(self, modname):
-        return hasattr(self, identifier(modname))
+        modname = identifier(modname)
+        try:
+            self._get_module(modname, log=False)
+        except Exception:
+            return False
+        else:
+            return True
 
     @asyn.asyncf
     async def lsmod(self):
@@ -1442,14 +1507,11 @@ fi
     def install_module(self, mod, **params):
         mod = get_module(mod)
         if mod.stage == 'early':
-            msg = 'Module {} cannot be installed after device setup has already occoured.'
-            raise TargetStableError(msg)
-
-        if mod.probe(self):
-            self._install_module(mod, **params)
+            raise TargetStableError(
+                f'Module "{mod.name}" cannot be installed after device setup has already occoured'
+            )
         else:
-            msg = 'Module {} is not supported by the target'.format(mod.name)
-            raise TargetStableError(msg)
+            return self._install_module(mod, params)
 
     # internal methods
 
@@ -1500,39 +1562,82 @@ fi
                 extracted = dest
         return extracted
 
-    def _update_modules(self, stage):
-        for mod_name in copy.copy(self.modules):
-            if isinstance(mod_name, dict):
-                mod_name, params = list(mod_name.items())[0]
-            else:
-                params = {}
-            mod = get_module(mod_name)
-            if not mod.stage == stage:
-                continue
-            if mod.probe(self):
-                self._install_module(mod, **params)
-            else:
-                msg = 'Module {} is not supported by the target'.format(mod.name)
-                self.modules.remove(mod_name)
-                if self.load_default_modules:
-                    self.logger.debug(msg)
-                else:
-                    self.logger.warning(msg)
-
-    def _install_module(self, mod, **params):
+    def _install_module(self, mod, params, log=True):
+        mod = get_module(mod)
         name = mod.name
-        if name not in self._installed_modules:
-            self.logger.debug('Installing module {}'.format(name))
-            try:
-                mod.install(self, **params)
-            except Exception as e:
-                self.logger.error('Module "{}" failed to install on target: {}'.format(name, e))
-                raise
-            self._installed_modules[name] = mod
-            if name not in self.modules:
-                self.modules.append(name)
+        if params is None or self._modules.get(name, {}) is None:
+            raise TargetStableError(f'Could not load module "{name}" as it has been explicilty disabled')
         else:
-            self.logger.debug('Module {} is already installed.'.format(name))
+            try:
+                return mod.install(self, **params)
+            except Exception as e:
+                if log:
+                    self.logger.error(f'Module "{name}" failed to install on target: {e}')
+                raise
+
+    @property
+    def modules(self):
+        return sorted(self._modules.keys())
+
+    def _update_modules(self, stage):
+        to_install = [
+            (mod, params)
+            for mod, params in (
+                (get_module(name), params)
+                for name, params in self._modules.items()
+            )
+            if mod.stage == stage
+        ]
+        for mod, params in to_install:
+            try:
+                self._install_module(mod, params)
+            except Exception as e:
+                mod_name = mod.name
+                self.logger.warning(f'Module {mod.name} is not supported by the target: {e}')
+
+    def _get_module(self, modname, log=True):
+        try:
+            return self._installed_modules[modname]
+        except KeyError:
+            params = {}
+            try:
+                mod = get_module(modname)
+            # We might try to access e.g. "boot" attribute, which is ambiguous
+            # since there are multiple modules with the "boot" kind. In that
+            # case, we look into the list of modules enabled by the user and
+            # get the first "boot" module we find.
+            except ValueError:
+                for _mod, _params in self._modules.items():
+                    try:
+                        _mod = get_module(_mod)
+                    except ValueError:
+                        pass
+                    else:
+                        if _mod.attr_name == modname:
+                            mod = _mod
+                            params = _params
+                            break
+                else:
+                    raise AttributeError(
+                        f"'{self.__class__.__name__}' object has no attribute '{modname}'"
+                    )
+            else:
+                params = self._modules.get(mod.name, {})
+
+            self._install_module(mod, params, log=log)
+            return self.__getattr__(modname)
+
+    def __getattr__(self, attr):
+        # When unpickled, objects will have an empty dict so fail early
+        if attr.startswith('__') and attr.endswith('__'):
+            raise AttributeError(attr)
+
+        try:
+            return self._get_module(attr)
+        except Exception as e:
+            # Raising AttributeError is important otherwise hasattr() will not
+            # work as expected
+            raise AttributeError(str(e))
 
     def _resolve_paths(self):
         raise NotImplementedError()
