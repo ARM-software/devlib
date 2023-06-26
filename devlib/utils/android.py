@@ -88,12 +88,6 @@ INTENT_FLAGS = {
     'ACTIVITY_CLEAR_TASK' : 0x00008000
 }
 
-
-# These were not set or not set to anything meaningful, so just keep them for
-# backward compat but they are not lazily detected.
-adb = None
-fastboot = None
-
 # Lazy init of some globals
 def __getattr__(attr):
     env = _AndroidEnvironment()
@@ -597,7 +591,6 @@ def adb_shell(device, command, timeout=None, check_exit_code=False,
     # Homogenise this behaviour by running the command then echoing the exit
     # code of the executed command itself.
     command = r'({}); echo "\n$?"'.format(command)
-
     command = su_cmd.format(quote(command)) if as_root else command
     command = ('shell', command)
     parts, env = _get_adb_parts(command, device, adb_server, adb_port, quote_adb=False)
@@ -732,7 +725,7 @@ def adb_list_devices(adb_server=None, adb_port=None):
 def _get_adb_parts(command, device=None, adb_server=None, adb_port=None, quote_adb=True):
     _quote = quote if quote_adb else lambda x: x
     parts = (
-        'adb',
+        adb,
         *(('-H', _quote(adb_server)) if adb_server is not None else ()),
         *(('-P', _quote(str(adb_port))) if adb_port is not None else ()),
         *(('-s', _quote(device)) if device is not None else ()),
@@ -798,21 +791,17 @@ class _AndroidEnvironment:
 
     @classmethod
     def _from_android_home(cls, android_home):
-        if android_home:
-            logger.debug('Using ANDROID_HOME from the environment.')
-            platform_tools = os.path.join(android_home, 'platform-tools')
+        logger.debug('Using ANDROID_HOME from the environment.')
+        platform_tools = os.path.join(android_home, 'platform-tools')
 
-            # TODO: that is very fishy
-            os.environ['PATH'] = platform_tools + os.pathsep + os.environ['PATH']
-
-            return {
-                'android_home': android_home,
-                'platform_tools': platform_tools,
-                **cls._init_common(
-                    android_home=android_home,
-                )
-            }
-            return paths
+        return {
+            'android_home': android_home,
+            'platform_tools': platform_tools,
+            'adb': os.path.join(platform_tools, 'adb'),
+            'fastboot': os.path.join(platform_tools, 'fastboot'),
+            **cls._init_common(android_home)
+        }
+        return paths
 
     @classmethod
     def _from_adb(cls):
@@ -825,6 +814,8 @@ class _AndroidEnvironment:
             return {
                 'android_home': android_home,
                 'platform_tools': platform_tools,
+                'adb': adb_path,
+                'fastboot': which('fastboot'),
                 **cls._init_common(android_home)
             }
         else:
