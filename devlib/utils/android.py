@@ -89,13 +89,21 @@ INTENT_FLAGS = {
 }
 
 
-# Initialized in functions near the botton of the file
-android_home = None
-platform_tools = None
+# These were not set or not set to anything meaningful, so just keep them for
+# backward compat but they are not lazily detected.
 adb = None
-aapt = None
-aapt_version = None
 fastboot = None
+
+# Lazy init of some globals
+def __getattr__(attr):
+    env = _AndroidEnvironment()
+
+    glob = globals()
+    glob.update(env.paths)
+    try:
+        return glob[attr]
+    except KeyError:
+        raise AttributeError(f"Module '{__name__}' has no attribute '{attr}'")
 
 
 class AndroidProperties(object):
@@ -162,7 +170,6 @@ class ApkInfo(object):
 
     # pylint: disable=too-many-branches
     def parse(self, apk_path):
-        _check_env()
         output = self._run([aapt, 'dump', 'badging', apk_path])
         for line in output.split('\n'):
             if line.startswith('application-label:'):
@@ -237,8 +244,8 @@ class ApkInfo(object):
                     package.append(i)
 
             for elem in package:
-                self._methods.extend([(meth.attrib['name'], klass.attrib['name']) 
-                                      for klass in elem.iter('class') 
+                self._methods.extend([(meth.attrib['name'], klass.attrib['name'])
+                                      for klass in elem.iter('class')
                                       for meth in klass.iter('method')])
         return self._methods
 
@@ -482,7 +489,6 @@ class AdbConnection(ConnectionBase):
 
 
 def fastboot_command(command, timeout=None, device=None):
-    _check_env()
     target = '-s {}'.format(quote(device)) if device else ''
     full_command = 'fastboot {} {}'.format(target, command)
     logger.debug(full_command)
@@ -532,7 +538,6 @@ def adb_get_device(timeout=None, adb_server=None, adb_port=None):
 
 
 def adb_connect(device, timeout=None, attempts=MAX_ATTEMPTS, adb_server=None, adb_port=None):
-    _check_env()
     tries = 0
     output = None
     while tries <= attempts:
@@ -560,7 +565,6 @@ def adb_connect(device, timeout=None, attempts=MAX_ATTEMPTS, adb_server=None, ad
 
 
 def adb_disconnect(device, adb_server=None, adb_port=None):
-    _check_env()
     if not device:
         return
     if ":" in device and device in adb_list_devices(adb_server, adb_port):
@@ -573,7 +577,6 @@ def adb_disconnect(device, adb_server=None, adb_port=None):
 
 
 def _ping(device, adb_server=None, adb_port=None):
-    _check_env()
     adb_cmd = get_adb_command(device, 'shell', adb_server, adb_port)
     command = "{} {}".format(adb_cmd, quote('ls /data/local/tmp > /dev/null'))
     logger.debug(command)
@@ -587,7 +590,6 @@ def _ping(device, adb_server=None, adb_port=None):
 # pylint: disable=too-many-locals
 def adb_shell(device, command, timeout=None, check_exit_code=False,
               as_root=False, adb_server=None, adb_port=None, su_cmd='su -c {}'):  # NOQA
-    _check_env()
 
     # On older combinations of ADB/Android versions, the adb host command always
     # exits with 0 if it was able to run the command on the target, even if the
@@ -655,9 +657,8 @@ def adb_background_shell(conn, command,
     adb_server = conn.adb_server
     adb_port = conn.adb_port
     busybox = conn.busybox
-
-    _check_env()
     orig_command = command
+
     stdout, stderr, command = redirect_streams(stdout, stderr, command)
     if as_root:
         command = f'{busybox} printf "%s" {quote(command)} | su'
@@ -742,7 +743,6 @@ def _get_adb_parts(command, device=None, adb_server=None, adb_port=None, quote_a
 
 
 def get_adb_command(device, command, adb_server=None, adb_port=None):
-    _check_env()
     parts, env = _get_adb_parts((command,), device, adb_server, adb_port, quote_adb=True)
     env = [quote(f'{name}={val}') for name, val in sorted(env.items())]
     parts = [*env, *parts]
@@ -786,120 +786,133 @@ def grant_app_permissions(target, package):
 
 # Messy environment initialisation stuff...
 
-class _AndroidEnvironment(object):
-
+class _AndroidEnvironment:
     def __init__(self):
-        self.android_home = None
-        self.platform_tools = None
-        self.build_tools = None
-        self.adb = None
-        self.aapt = None
-        self.aapt_version = None
-        self.fastboot = None
-
-
-def _initialize_with_android_home(env):
-    logger.debug('Using ANDROID_HOME from the environment.')
-    env.android_home = android_home
-    env.platform_tools = os.path.join(android_home, 'platform-tools')
-    os.environ['PATH'] = env.platform_tools + os.pathsep + os.environ['PATH']
-    _init_common(env)
-    return env
-
-
-def _initialize_without_android_home(env):
-    adb_full_path = which('adb')
-    if adb_full_path:
-        env.adb = 'adb'
-    else:
-        raise HostError('ANDROID_HOME is not set and adb is not in PATH. '
-                        'Have you installed Android SDK?')
-    logger.debug('Discovering ANDROID_HOME from adb path.')
-    env.platform_tools = os.path.dirname(adb_full_path)
-    env.android_home = os.path.dirname(env.platform_tools)
-    _init_common(env)
-    return env
-
-def _init_common(env):
-    _discover_build_tools(env)
-    _discover_aapt(env)
-
-def _discover_build_tools(env):
-    logger.debug('ANDROID_HOME: {}'.format(env.android_home))
-    build_tools_directory = os.path.join(env.android_home, 'build-tools')
-    if os.path.isdir(build_tools_directory):
-        env.build_tools = build_tools_directory
-
-def _check_supported_aapt2(binary):
-    # At time of writing the version argument of aapt2 is not helpful as
-    # the output is only a placeholder that does not distinguish between versions
-    # with and without support for badging. Unfortunately aapt has been
-    # deprecated and fails to parse some valid apks so we will try to favour
-    # aapt2 if possible else will fall back to aapt.
-    # Try to execute the badging command and check if we get an expected error
-    # message as opposed to an unknown command error to determine if we have a
-    # suitable version.
-    cmd = '{} dump badging'.format(binary)
-    result = subprocess.run(cmd.encode('utf-8'), shell=True, stderr=subprocess.PIPE)
-    supported = bool(AAPT_BADGING_OUTPUT.search(result.stderr.decode('utf-8')))
-    msg = 'Found a {} aapt2 binary at: {}'
-    logger.debug(msg.format('supported' if supported else 'unsupported', binary))
-    return supported
-
-def _discover_aapt(env):
-    if env.build_tools:
-        aapt_path = ''
-        aapt2_path = ''
-        versions = os.listdir(env.build_tools)
-        for version in reversed(sorted(versions)):
-            if not os.path.isfile(aapt2_path):
-                aapt2_path = os.path.join(env.build_tools, version, 'aapt2')
-            if not os.path.isfile(aapt_path):
-                aapt_path = os.path.join(env.build_tools, version, 'aapt')
-                aapt_version = 1
-            # Use latest available version for aapt/appt2 but ensure at least one is valid.
-            if os.path.isfile(aapt2_path) or os.path.isfile(aapt_path):
-                break
-
-        # Use aapt2 only if present and we have a suitable version
-        if aapt2_path and _check_supported_aapt2(aapt2_path):
-            aapt_path = aapt2_path
-            aapt_version = 2
-
-        # Use the aapt version discoverted from build tools.
-        if aapt_path:
-            logger.debug('Using {} for version {}'.format(aapt_path, version))
-            env.aapt = aapt_path
-            env.aapt_version = aapt_version
-            return
-
-    # Try detecting aapt2 and aapt from PATH
-    if not env.aapt:
-            aapt2_path = which('aapt2')
-            if _check_supported_aapt2(aapt2_path):
-                env.aapt = aapt2_path
-                env.aapt_version = 2
-            else:
-                env.aapt = which('aapt')
-                env.aapt_version = 1
-
-    if not env.aapt:
-        raise HostError('aapt/aapt2 not found. Please make sure it is avaliable in PATH'
-                        ' or at least one Android platform is installed')
-
-def _check_env():
-    global android_home, platform_tools, adb, aapt, aapt_version  # pylint: disable=W0603
-    if not android_home:
         android_home = os.getenv('ANDROID_HOME')
         if android_home:
-            _env = _initialize_with_android_home(_AndroidEnvironment())
+            paths = self._from_android_home(android_home)
         else:
-            _env = _initialize_without_android_home(_AndroidEnvironment())
-        android_home = _env.android_home
-        platform_tools = _env.platform_tools
-        adb = _env.adb
-        aapt = _env.aapt
-        aapt_version = _env.aapt_version
+            paths = self._from_adb()
+
+        self.paths = paths
+
+    @classmethod
+    def _from_android_home(cls, android_home):
+        if android_home:
+            logger.debug('Using ANDROID_HOME from the environment.')
+            platform_tools = os.path.join(android_home, 'platform-tools')
+
+            # TODO: that is very fishy
+            os.environ['PATH'] = platform_tools + os.pathsep + os.environ['PATH']
+
+            return {
+                'android_home': android_home,
+                'platform_tools': platform_tools,
+                **cls._init_common(
+                    android_home=android_home,
+                )
+            }
+            return paths
+
+    @classmethod
+    def _from_adb(cls):
+        adb_path = which('adb')
+        if adb_path:
+            logger.debug('Discovering ANDROID_HOME from adb path.')
+            platform_tools = os.path.dirname(adb_path)
+            android_home = os.path.dirname(platform_tools)
+
+            return {
+                'android_home': android_home,
+                'platform_tools': platform_tools,
+                **cls._init_common(android_home)
+            }
+        else:
+            raise HostError('ANDROID_HOME is not set and adb is not in PATH. '
+                            'Have you installed Android SDK?')
+
+    @classmethod
+    def _init_common(cls, android_home):
+        logger.debug(f'ANDROID_HOME: {android_home}')
+        build_tools = cls._discover_build_tools(android_home)
+        return {
+            'build_tools': build_tools,
+            **cls._discover_aapt(build_tools)
+        }
+
+    @staticmethod
+    def _discover_build_tools(android_home):
+        build_tools = os.path.join(android_home, 'build-tools')
+        if os.path.isdir(build_tools):
+            return build_tools
+        else:
+            return None
+
+    @staticmethod
+    def _check_supported_aapt2(binary):
+        # At time of writing the version argument of aapt2 is not helpful as
+        # the output is only a placeholder that does not distinguish between versions
+        # with and without support for badging. Unfortunately aapt has been
+        # deprecated and fails to parse some valid apks so we will try to favour
+        # aapt2 if possible else will fall back to aapt.
+        # Try to execute the badging command and check if we get an expected error
+        # message as opposed to an unknown command error to determine if we have a
+        # suitable version.
+        result = subprocess.run([str(binary), 'dump', 'badging'], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True)
+        supported = bool(AAPT_BADGING_OUTPUT.search(result.stderr))
+        msg = 'Found a {} aapt2 binary at: {}'
+        logger.debug(msg.format('supported' if supported else 'unsupported', binary))
+        return supported
+
+    @classmethod
+    def _discover_aapt(cls, build_tools):
+        if build_tools:
+
+            def find_aapt2(version):
+                path = os.path.join(build_tools, version, 'aapt2')
+                if os.path.isfile(path) and cls._check_supported_aapt2(path):
+                    return (2, path)
+                else:
+                    return (None, None)
+
+            def find_aapt(version):
+                path = os.path.join(build_tools, version, 'aapt')
+                if os.path.isfile(path):
+                    return (1, path)
+                else:
+                    return (None, None)
+
+            versions = os.listdir(build_tools)
+            found = (
+                (version, finder(version))
+                for version in reversed(sorted(versions))
+                for finder in (find_aapt2, find_aapt)
+            )
+
+            for version, (aapt_version, aapt_path) in found:
+                if aapt_path:
+                    logger.debug(f'Using {aapt_path} for version {version}')
+                    return dict(
+                        aapt=aapt_path,
+                        aapt_version=aapt_version,
+                    )
+
+        # Try detecting aapt2 and aapt from PATH
+        aapt2_path = which('aapt2')
+        aapt_path = which('aapt')
+        if aapt2_path and cls._check_supported_aapt2(aapt2_path):
+            return dict(
+                aapt=aapt2_path,
+                aapt_version=2,
+            )
+        elif aapt_path:
+            return dict(
+                aapt=aapt_path,
+                aapt_version=1,
+            )
+        else:
+            raise HostError('aapt/aapt2 not found. Please make sure it is avaliable in PATH or at least one Android platform is installed')
+
 
 class LogcatMonitor(object):
     """
