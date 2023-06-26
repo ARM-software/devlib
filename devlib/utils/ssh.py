@@ -1604,13 +1604,15 @@ class AndroidGem5Connection(Gem5Connection):
 
         gem5_logger.info("Android booted")
 
+
 def _give_password(password, command):
-    if not sshpass:
+    if sshpass:
+        pass_template = "{} -p {} "
+        pass_string = pass_template.format(quote(sshpass), quote(password))
+        redacted_string = pass_template.format(quote(sshpass), quote('<redacted>'))
+        return (pass_string + command, redacted_string + command)
+    else:
         raise HostError('Must have sshpass installed on the host in order to use password-based auth.')
-    pass_template = "sshpass -p {} "
-    pass_string = pass_template.format(quote(password))
-    redacted_string = pass_template.format(quote('<redacted>'))
-    return (pass_string + command, redacted_string + command)
 
 
 def process_backspaces(text):
