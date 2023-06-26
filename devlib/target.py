@@ -130,13 +130,7 @@ class Target(object):
     os = None
     system_id = None
 
-    default_modules = [
-        'hotplug',
-        'cpufreq',
-        'cpuidle',
-        'cgroups',
-        'hwmon',
-    ]
+    default_modules = []
 
     @property
     def core_names(self):
