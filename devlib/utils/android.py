@@ -657,6 +657,7 @@ def adb_background_shell(conn, command,
     busybox = conn.busybox
 
     _check_env()
+    orig_command = command
     stdout, stderr, command = redirect_streams(stdout, stderr, command)
     if as_root:
         command = f'{busybox} printf "%s" {quote(command)} | su'
@@ -693,10 +694,25 @@ def adb_background_shell(conn, command,
     # avoids having to rely on PID ordering (which could be misleading if PIDs
     # got recycled).
     find_pid = f'''pids=$({busybox} ps -A -o pid,args | {grep_cmd} | {busybox} grep -v {quote(grep_cmd)} | {busybox} awk '{{print $1}}') && {busybox} printf "%s" "$pids" && {busybox} kill -CONT $pids'''
-    pids = conn.execute(find_pid, as_root=as_root)
-    # We choose the highest PID as the "control" PID. It actually does not
-    # really matter which one we pick, as they are all equivalent sh -c layers.
-    pid = max(map(int, pids.split()))
+
+    excep = None
+    for _ in range(5):
+        try:
+            pids = conn.execute(find_pid, as_root=as_root)
+            # We choose the highest PID as the "control" PID. It actually does not
+            # really matter which one we pick, as they are all equivalent sh -c layers.
+            pid = max(map(int, pids.split()))
+        except TargetStableError:
+            raise
+        except Exception as e:
+            excep = e
+            time.sleep(10e-3)
+            continue
+        else:
+            break
+    else:
+        raise TargetTransientError(f'Could not detect PID of background command: {orig_command}') from excep
+
     return (p, pid)
 
 def adb_kill_server(timeout=30, adb_server=None):
