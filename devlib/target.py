@@ -54,7 +54,9 @@ from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
                               TargetTransientError, KernelConfigKeyError,
-                              TargetError, HostError, TargetCalledProcessError) # pylint: disable=redefined-builtin
+                              TargetError, HostError, TargetCalledProcessError,
+                              TargetStableCalledProcessError, TargetTransientCalledProcessError,
+                              ) # pylint: disable=redefined-builtin
 from devlib.utils.ssh import SshConnection
 from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
@@ -889,6 +891,32 @@ class Target(object):
                 check_exit_code=check_exit_code, as_root=as_root,
                 strip_colors=strip_colors, will_succeed=will_succeed)
 
+    @asyn.asyncf
+    @call_conn
+    async def execute_raw(self, command, *, timeout=None, check_exit_code=True,
+                as_root=False, will_succeed=False, force_locale='C'):
+        bg = self.background(
+            command=command,
+            as_root=as_root,
+            force_locale=force_locale,
+        )
+
+        # TODO: make BackgroundCommand API async-friendly and use that
+        with bg as bg:
+            try:
+                # Timeout on communicate() usually saves a thread
+                stdout, stderr = bg.communicate(timeout=timeout)
+            except subprocess.CalledProcessError as e:
+                if check_exit_code:
+                    if will_succeed:
+                        raise TargetTransientCalledProcessError(*e.args)
+                    else:
+                        raise
+                else:
+                    return (e.stdout, e.stderr)
+            else:
+                return (stdout, stderr)
+
     execute = asyn._AsyncPolymorphicFunction(
         asyn=_execute_async.asyn,
         blocking=_execute,
@@ -1332,7 +1360,7 @@ fi
                 # if it is a file and not a folder
                 if content_f:
                     content = content_f.read()
-                    if decode_unicode:
+                    if decode_unicode in (True, None):
                         try:
                             content = content.decode('utf-8').strip()
                             if strip_null_chars:
@@ -1346,27 +1374,37 @@ fi
         return result
 
     @asyn.asyncf
-    async def read_tree_values_flat(self, path, depth=1, check_exit_code=True):
+    async def read_tree_values_flat(self, path, depth=1, check_exit_code=True, decode=None):
         self.async_manager.track_access(
             asyn.PathAccess(namespace='target', path=path, mode='r')
         )
         command = 'read_tree_values {} {}'.format(quote(path), depth)
         output = await self._execute_util.asyn(command, as_root=self.is_rooted,
-                                    check_exit_code=check_exit_code)
-
+                                    check_exit_code=check_exit_code, decode=False)
         accumulator = defaultdict(list)
-        for entry in output.strip().split('\n'):
-            if ':' not in entry:
+        for entry in output.strip().splitlines():
+            if b':' not in entry:
                 continue
-            path, value = entry.strip().split(':', 1)
+            path, value = entry.strip().split(b':', 1)
             accumulator[path].append(value)
 
-        result = {k: '\n'.join(v).strip() for k, v in accumulator.items()}
+        if decode is None:
+            def do_decode(b):
+                try:
+                    return b.decode()
+                except UnicodeDecodeError:
+                    return b
+        elif decode:
+            do_decode = lambda b: b.decode()
+        else:
+            do_decode = lambda b: b
+
+        result = {k.decode(): do_decode(b'\n'.join(v).strip()) for k, v in accumulator.items()}
         return result
 
     @asyn.asyncf
     async def read_tree_values(self, path, depth=1, dictcls=dict,
-                         check_exit_code=True, tar=False, decode_unicode=True,
+                         check_exit_code=True, tar=False, decode_unicode=None,
                          strip_null_chars=True):
         """
         Reads the content of all files under a given tree
@@ -1384,7 +1422,7 @@ fi
         :returns: a tree-like dict with the content of files as leafs
         """
         if not tar:
-            value_map = await self.read_tree_values_flat.asyn(path, depth, check_exit_code)
+            value_map = await self.read_tree_values_flat.asyn(path, depth, check_exit_code, decode=decode_unicode)
         else:
             value_map = await self.read_tree_tar_flat.asyn(path, depth, check_exit_code,
                                                 decode_unicode,
@@ -1420,14 +1458,15 @@ fi
 
     @asyn.asyncf
     @call_conn
-    async def _execute_util(self, command, timeout=None, check_exit_code=True, as_root=False):
+    async def _execute_util(self, command, timeout=None, check_exit_code=True, as_root=False, decode=True):
         command = '{} sh {} {}'.format(quote(self.busybox), quote(self.shutils), command)
-        return await self.execute.asyn(
-            command,
+        stdout, stderr = await self.execute_raw.asyn(
+            command=command,
             timeout=timeout,
             check_exit_code=check_exit_code,
-            as_root=as_root
+            as_root=as_root,
         )
+        return stdout.decode() if decode else stdout
 
     async def _extract_archive(self, path, cmd, dest=None):
         cmd = '{} ' + cmd  # busybox
