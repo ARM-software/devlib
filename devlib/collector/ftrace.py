@@ -19,6 +19,7 @@ import time
 import re
 import subprocess
 import sys
+import signal
 import contextlib
 from shlex import quote
 
@@ -51,6 +52,7 @@ TIMEOUT = 180
 CPU_RE = re.compile(r'  Function \(CPU([0-9]+)\)')
 STATS_RE = re.compile(r'([^ ]*) +([0-9]+) +([0-9.]+) us +([0-9.]+) us +([0-9.]+) us')
 
+
 class FtraceCollector(CollectorBase):
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
@@ -71,6 +73,7 @@ class FtraceCollector(CollectorBase):
                  report_on_target=False,
                  trace_clock='local',
                  saved_cmdlines_nr=4096,
+                 trace_cmd_mode='start',
                  ):
         super(FtraceCollector, self).__init__(target)
         self.events = events if events is not None else DEFAULT_EVENTS
@@ -85,9 +88,7 @@ class FtraceCollector(CollectorBase):
         self.autoview = autoview
         self.strict = strict
         self.report_on_target = report_on_target
-        self.target_output_file = target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE)
-        text_file_name = target.path.splitext(OUTPUT_TRACE_FILE)[0] + '.txt'
-        self.target_text_file = target.path.join(self.target.working_directory, text_file_name)
+        self.trace_cmd_mode = trace_cmd_mode
         self.output_path = None
         self.target_binary = None
         self.host_binary = None
@@ -98,6 +99,13 @@ class FtraceCollector(CollectorBase):
         self.trace_clock = trace_clock
         self.saved_cmdlines_nr = saved_cmdlines_nr
         self._reset_needed = True
+        self.bg_cmd = None
+        self.tmp_working_directory = self.target.execute("{} mktemp -p {} -d".format(
+            self.target.busybox, self.target.working_directory,
+        ), as_root=True).strip()
+        self.target_output_file = target.path.join(self.tmp_working_directory, OUTPUT_TRACE_FILE)
+        text_file_name = target.path.splitext(OUTPUT_TRACE_FILE)[0] + '.txt'
+        self.target_text_file = target.path.join(self.tmp_working_directory, text_file_name)
 
         # pylint: disable=bad-whitespace
         # Setup tracing paths
@@ -240,8 +248,7 @@ class FtraceCollector(CollectorBase):
         return self.target.read_value(self.available_functions_file).splitlines()
 
     def reset(self):
-        self.target.execute('{} reset -B devlib'.format(self.target_binary),
-                            as_root=True, timeout=TIMEOUT)
+        self.target.execute('{} reset -B devlib'.format(self.target_binary), as_root=True, timeout=TIMEOUT)
 
         # trace-cmd start will not set the top-level buffer size if passed -B
         # parameter, but unfortunately some events still end up there (e.g.
@@ -249,10 +256,7 @@ class FtraceCollector(CollectorBase):
         # might be too small and some event lost.
         top_buffer_size = self.top_buffer_size if self.top_buffer_size else self.buffer_size
         if top_buffer_size:
-            self.target.write_value(
-                self.target.path.join(self.tracing_path, 'buffer_size_kb'),
-                top_buffer_size,
-            )
+            self.target.write_value(self.target.path.join(self.tracing_path, 'buffer_size_kb'), top_buffer_size)
 
         if self.functions:
             self.target.write_value(self.function_profile_file, 0, verify=False)
@@ -276,18 +280,30 @@ class FtraceCollector(CollectorBase):
         with contextlib.suppress(TargetStableError):
             self.target.write_value('/proc/sys/kernel/kptr_restrict', 0)
 
-        self.target.execute(
-            '{} start -B devlib {buffer_size} {cmdlines_size} {clock} {events} {tracer} {functions}'.format(
-                self.target_binary,
-                events=self.event_string,
-                tracer=tracer_string,
-                functions=tracecmd_functions,
-                buffer_size='-b {}'.format(self.buffer_size) if self.buffer_size is not None else '',
-                clock='-C {}'.format(self.trace_clock) if self.trace_clock else '',
-                cmdlines_size='--cmdlines-size {}'.format(self.saved_cmdlines_nr) if self.saved_cmdlines_nr is not None else '',
-            ),
-            as_root=True,
+        trace_cmd = '{} {command} -B devlib {buffer_size} {cmdlines_size} {clock} {events} {tracer} {functions}'.format(
+            self.target_binary,
+            command=self.trace_cmd_mode,
+            events=self.event_string,
+            tracer=tracer_string,
+            functions=tracecmd_functions,
+            buffer_size='-b {}'.format(self.buffer_size) if self.buffer_size is not None else '',
+            clock='-C {}'.format(self.trace_clock) if self.trace_clock else '',
+            cmdlines_size='--cmdlines-size {}'.format(self.saved_cmdlines_nr) if self.saved_cmdlines_nr is not None else '',
         )
+
+        if self.trace_cmd_mode == 'record':
+            trace_cmd = "cd {} && {command} {output}".format(
+                self.tmp_working_directory,
+                command=trace_cmd,
+                output="-o {}".format(self.target_output_file)
+            )
+            if self.bg_cmd is None:
+                self.bg_cmd = self.target.background(trace_cmd, as_root=True)
+            else:
+                raise TargetStableError('ftrace collector is not re-entrant')
+        else:
+            self.target.execute(trace_cmd, as_root=True)
+
         if self.automark:
             self.mark_start()
         if 'cpufreq' in self.target.modules:
@@ -310,7 +326,6 @@ class FtraceCollector(CollectorBase):
                                     as_root=True),
             )
 
-
     def stop(self):
         # Disable kernel function profiling
         if self.functions and self.tracer is None:
@@ -322,8 +337,12 @@ class FtraceCollector(CollectorBase):
         self.stop_time = time.time()
         if self.automark:
             self.mark_stop()
-        self.target.execute('{} stop -B devlib'.format(self.target_binary),
-                            timeout=TIMEOUT, as_root=True)
+        if self.trace_cmd_mode == 'record':
+            self.bg_cmd.send_signal(signal.SIGINT)
+            self.bg_cmd.wait()
+            self.bg_cmd = None
+        else:
+            self.target.execute('{} stop -B devlib'.format(self.target_binary), timeout=TIMEOUT, as_root=True)
         self._reset_needed = True
 
     def set_output(self, output_path):
@@ -334,15 +353,13 @@ class FtraceCollector(CollectorBase):
     def get_data(self):
         if self.output_path is None:
             raise RuntimeError("Output path was not set.")
-        self.target.execute('{0} extract -B devlib -o {1}; chmod 666 {1}'.format(self.target_binary,
-                                                                       self.target_output_file),
-                            timeout=TIMEOUT, as_root=True)
 
-        # The size of trace.dat will depend on how long trace-cmd was running.
-        # Therefore timout for the pull command must also be adjusted
-        # accordingly.
-        pull_timeout = 10 * (self.stop_time - self.start_time)
-        self.target.pull(self.target_output_file, self.output_path, timeout=pull_timeout)
+        if self.trace_cmd_mode == 'start':
+            self.target.execute('{0} extract -B devlib -o {1}; chmod 666 {1}'.format(
+                self.target_binary, self.target_output_file
+            ), timeout=TIMEOUT, as_root=True)
+
+        self.target.pull(self.target_output_file, self.output_path)
         output = CollectorOutput()
         if not os.path.isfile(self.output_path):
             self.logger.warning('Binary trace not pulled from device.')
@@ -352,8 +369,7 @@ class FtraceCollector(CollectorBase):
                 textfile = os.path.splitext(self.output_path)[0] + '.txt'
                 if self.report_on_target:
                     self.generate_report_on_target()
-                    self.target.pull(self.target_text_file,
-                                     textfile, timeout=pull_timeout)
+                    self.target.pull(self.target_text_file, textfile)
                 else:
                     self.report(self.output_path, textfile)
                 output.append(CollectorOutputEntry(textfile, 'file'))
@@ -440,7 +456,12 @@ class FtraceCollector(CollectorBase):
         check_output('{} {}'.format(self.kernelshark, binfile), shell=True)
 
     def teardown(self):
-        self.target.remove(self.target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE))
+        self.target.remove(self.target_output_file)
+        if self.report_on_target:
+            self.target.remove(self.target_text_file)
+
+    def finalize(self):
+        self.target.remove(self.tmp_working_directory)
 
     def mark_start(self):
         self.target.write_value(self.marker_file, TRACE_MARKER_START, verify=False)
