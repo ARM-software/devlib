@@ -74,6 +74,7 @@ class FtraceCollector(CollectorBase):
                  trace_clock='local',
                  saved_cmdlines_nr=4096,
                  trace_cmd_mode='start',
+                 record_interval=1000,
                  ):
         super(FtraceCollector, self).__init__(target)
         self.events = events if events is not None else DEFAULT_EVENTS
@@ -98,6 +99,7 @@ class FtraceCollector(CollectorBase):
         self.function_string = None
         self.trace_clock = trace_clock
         self.saved_cmdlines_nr = saved_cmdlines_nr
+        self.record_interval = record_interval
         self._reset_needed = True
         self.bg_cmd = None
         self.tmp_working_directory = self.target.execute("{} mktemp -p {} -d".format(
@@ -292,9 +294,10 @@ class FtraceCollector(CollectorBase):
         )
 
         if self.trace_cmd_mode == 'record':
-            trace_cmd = "cd {} && {command} {output}".format(
+            trace_cmd = "cd {} && {command} {interval} {output}".format(
                 self.tmp_working_directory,
                 command=trace_cmd,
+                interval="-s {}".format(self.record_interval),
                 output="-o {}".format(self.target_output_file)
             )
             if self.bg_cmd is None:
