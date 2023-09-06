@@ -2092,6 +2092,8 @@ class AndroidTarget(Target):
                 pass # Ignore if not requested
             elif 'Operation not allowed' in e.message:
                 pass # Ignore if not allowed
+            elif 'is managed by role' in e.message:
+                pass # Ignore if cannot be granted
             else:
                 raise
 
