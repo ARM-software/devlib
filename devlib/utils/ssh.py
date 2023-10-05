@@ -758,11 +758,7 @@ class SshConnection(SshConnectionBase):
         output_chunks, exit_code = _read_paramiko_streams(stdout, stderr, select_timeout, callback, [])
         # Join in one go to avoid O(N^2) concatenation
         output = b''.join(output_chunks)
-
-        if sys.version_info[0] == 3:
-            output = output.decode(sys.stdout.encoding or 'utf-8', 'replace')
-        if strip_colors:
-            output = strip_bash_colors(output)
+        output = output.decode(sys.stdout.encoding or 'utf-8', 'replace')
 
         return (exit_code, output)
 
@@ -970,10 +966,7 @@ class TelnetConnection(SshConnectionBase):
                 logger.debug(command)
             self._sendline(command)
         timed_out = self._wait_for_prompt(timeout)
-        if sys.version_info[0] == 3:
-            output = process_backspaces(self.conn.before.decode(sys.stdout.encoding or 'utf-8', 'replace'))
-        else:
-            output = process_backspaces(self.conn.before)
+        output = process_backspaces(self.conn.before.decode(sys.stdout.encoding or 'utf-8', 'replace'))
 
         if timed_out:
             self.cancel_running_command()

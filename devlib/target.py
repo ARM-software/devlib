@@ -2029,10 +2029,7 @@ class AndroidTarget(Target):
 
         parsed_xml = xml.dom.minidom.parse(filepath)
         with open(filepath, 'w') as f:
-            if sys.version_info[0] == 3:
-                f.write(parsed_xml.toprettyxml())
-            else:
-                f.write(parsed_xml.toprettyxml().encode('utf-8'))
+            f.write(parsed_xml.toprettyxml())
 
     @asyn.asyncf
     async def is_installed(self, name):
