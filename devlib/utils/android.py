@@ -243,8 +243,7 @@ class ApkInfo(object):
         logger.debug(' '.join(command))
         try:
             output = subprocess.check_output(command, stderr=subprocess.STDOUT)
-            if sys.version_info[0] == 3:
-                output = output.decode(sys.stdout.encoding or 'utf-8', 'replace')
+            output = output.decode(sys.stdout.encoding or 'utf-8', 'replace')
         except subprocess.CalledProcessError as e:
             raise HostError('Error while running "{}":\n{}'
                             .format(command, e.output))
