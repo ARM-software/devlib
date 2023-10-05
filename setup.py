@@ -104,6 +104,7 @@ params = dict(
         'pandas',
         'lxml', # More robust xml parsing
         'nest_asyncio', # Allows running nested asyncio loops
+        'future', # for the "past" Python package
     ],
     extras_require={
         'daq': ['daqpower>=2'],
