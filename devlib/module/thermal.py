@@ -58,9 +58,9 @@ class ThermalZone(object):
         for entry in self.target.list_directory(self.path, as_root=target.is_rooted):
             re_match = re.match('^trip_point_([0-9]+)_temp', entry)
             if re_match is not None:
-                self.add_trip_point(re_match.group(1))
+                self._add_trip_point(re_match.group(1))
 
-    def add_trip_point(self, _id):
+    def _add_trip_point(self, _id):
         self.trip_points[int(_id)] = TripPoint(self, _id)
 
     @asyn.asyncf
@@ -154,12 +154,12 @@ class ThermalModule(Module):
                 continue
 
             if re_match.group(1) == 'thermal_zone':
-                self.add_thermal_zone(re_match.group(2))
+                self._add_thermal_zone(re_match.group(2))
             elif re_match.group(1) == 'cooling_device':
                 # TODO
                 pass
 
-    def add_thermal_zone(self, _id):
+    def _add_thermal_zone(self, _id):
         self.zones[int(_id)] = ThermalZone(self.target, self.thermal_root, _id)
 
     def disable_all_zones(self):
