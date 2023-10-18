@@ -75,7 +75,7 @@ ANDROID_SCREEN_ROTATION_REGEX = re.compile(r'orientation=(?P<rotation>[0-3])')
 DEFAULT_SHELL_PROMPT = re.compile(r'^.*(shell|root|juno)@?.*:[/~]\S* *[#$] ',
                                   re.MULTILINE)
 KVERSION_REGEX = re.compile(
-    r'(?P<version>\d+)(\.(?P<major>\d+)(\.(?P<minor>\d+)(-rc(?P<rc>\d+))?)?)?(-(?P<commits>\d+)-g(?P<sha1>[0-9a-fA-F]{7,}))?'
+    r'(?P<version>\d+)(\.(?P<major>\d+)(\.(?P<minor>\d+))?(-rc(?P<rc>\d+))?)?(-android(?P<android_version>[0-9]+))?(-(?P<commits>\d+)-g(?P<sha1>[0-9a-fA-F]{7,}))?(-ab(?P<gki_abi>[0-9]+))?'
 )
 
 GOOGLE_DNS_SERVER_ADDRESS = '8.8.8.8'
@@ -2527,6 +2527,10 @@ class KernelVersion(object):
     :type commits: int
     :ivar sha1: Kernel git revision hash, if available (otherwise None)
     :type sha1: str
+    :ivar android_version: Android version, if available (otherwise None)
+    :type android_version: int
+    :ivar gki_abi: GKI kernel abi, if available (otherwise None)
+    :type gki_abi: str
 
     :ivar parts: Tuple of version number components. Can be used for
                  lexicographically comparing kernel versions.
@@ -2550,6 +2554,8 @@ class KernelVersion(object):
         self.sha1 = None
         self.rc = None
         self.commits = None
+        self.gki_abi = None
+        self.android_version = None
         match = KVERSION_REGEX.match(version_string)
         if match:
             groups = match.groupdict()
@@ -2563,6 +2569,10 @@ class KernelVersion(object):
                 self.commits = int(groups['commits'])
             if groups['sha1'] is not None:
                 self.sha1 = match.group('sha1')
+            if groups['gki_abi'] is not None:
+                self.gki_abi = match.group('gki_abi')
+            if groups['android_version'] is not None:
+                self.android_version = int(match.group('android_version'))
 
         self.parts = (self.version_number, self.major, self.minor)
 
