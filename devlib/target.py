@@ -1178,6 +1178,17 @@ fi
         await self.execute.asyn('rm -rf -- {}'.format(quote(path)), as_root=as_root)
 
     # misc
+    @asyn.asyncf
+    async def read_sysctl(self, parameter):
+        """
+        Returns the value of the given sysctl parameter as a string.
+        """
+        path = target.path.join('proc', 'sys', *parameter.split('.'))
+        try:
+            return await self.read_value.asyn(path)
+        except FileNotFoundError as e:
+            raise ValueError(f'systcl parameter {parameter} was not found: {e}')
+
     def core_cpus(self, core):
         return [i for i, c in enumerate(self.core_names) if c == core]
 
