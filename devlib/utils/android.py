@@ -231,12 +231,15 @@ class ApkInfo(object):
             parser = etree.XMLParser(encoding='utf-8', recover=True)
             xml_tree = etree.parse(StringIO(dump), parser)
 
-            package = next((i for i in xml_tree.iter('package')
-                           if i.attrib['name'] == self.package), None)
+            package = []
+            for i in xml_tree.iter('package'):
+                if i.attrib['name'] == self.package:
+                    package.append(i)
 
-            self._methods = [(meth.attrib['name'], klass.attrib['name'])
-                             for klass in package.iter('class')
-                             for meth in klass.iter('method')] if package else []
+            for elem in package:
+                self._methods.extend([(meth.attrib['name'], klass.attrib['name']) 
+                                      for klass in elem.iter('class') 
+                                      for meth in klass.iter('method')])
         return self._methods
 
     def _run(self, command):
