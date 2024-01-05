@@ -2233,7 +2233,7 @@ class AndroidTarget(Target):
         if not await self.is_screen_on.asyn():
             self.execute('input keyevent 26')
         if verify and not await self.is_screen_on.asyn():
-             raise TargetStableError('Display cannot be turned on.')
+            raise TargetStableError('Display cannot be turned on.')
 
     @asyn.asyncf
     async def ensure_screen_is_on_and_stays(self, verify=True, mode=7):
