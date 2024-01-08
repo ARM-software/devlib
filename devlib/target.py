@@ -2214,6 +2214,11 @@ class AndroidTarget(Target):
         self.conn.reboot_bootloader()
 
     @asyn.asyncf
+    async def is_screen_locked(self):
+        screen_state = await self.execute.asyn('dumpsys window')
+        return 'mDreamingLockscreen=true' in screen_state
+
+    @asyn.asyncf
     async def is_screen_on(self):
         output = await self.execute.asyn('dumpsys power')
         match = ANDROID_SCREEN_STATE_REGEX.search(output)
