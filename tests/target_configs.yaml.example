@@ -1,0 +1,17 @@
+AndroidTarget:
+  entry-0:
+    connection_settings:
+      device: 'emulator-5554'
+
+LinuxTarget:
+  entry-0:
+    connection_settings:
+      host: 'example.com'
+      username: 'username'
+      password: 'password'
+
+LocalLinuxTarget:
+  entry-0:
+    connection_settings:
+      unrooted: True
+

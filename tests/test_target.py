@@ -17,12 +17,11 @@
 """Module for testing targets."""
 
 import os
-import shutil
-import tempfile
 from pprint import pp
 import pytest
 
-from devlib import LocalLinuxTarget
+from devlib import AndroidTarget, LinuxTarget, LocalLinuxTarget
+from devlib.utils.android import AdbConnection
 from devlib.utils.misc import load_struct_from_yaml
 
 
@@ -36,6 +35,23 @@ def build_targets():
         raise ValueError(f'{config_file} looks empty!')
 
     targets = []
+
+    if target_configs.get('AndroidTarget') is not None:
+        print('> Android targets:')
+        for entry in target_configs['AndroidTarget'].values():
+            pp(entry)
+            a_target = AndroidTarget(
+                connection_settings=entry['connection_settings'],
+                conn_cls=lambda **kwargs: AdbConnection(adb_as_root=True, **kwargs),
+            )
+            targets.append(a_target)
+
+    if target_configs.get('LinuxTarget') is not None:
+        print('> Linux targets:')
+        for entry in target_configs['LinuxTarget'].values():
+            pp(entry)
+            l_target = LinuxTarget(connection_settings=entry['connection_settings'])
+            targets.append(l_target)
 
     if target_configs.get('LocalLinuxTarget') is not None:
         print('> LocalLinux targets:')
@@ -62,15 +78,22 @@ def test_read_multiline_values(target):
         'test3': '3\n\n4\n\n',
     }
 
-    tempdir = tempfile.mkdtemp(prefix='devlib-test-')
-    for key, value in data.items():
-        path = os.path.join(tempdir, key)
-        with open(path, 'w', encoding='utf-8') as wfh:
-            wfh.write(value)
+    print(f'target={target.__class__.__name__} os={target.os} hostname={target.hostname}')
 
-    raw_result = target.read_tree_values_flat(tempdir)
-    result = {os.path.basename(k): v for k, v in raw_result.items()}
+    with target.make_temp() as tempdir:
+        print(f'Created {tempdir}.')
 
-    shutil.rmtree(tempdir)
+        for key, value in data.items():
+            path = os.path.join(tempdir, key)
+            print(f'Writing {value!r} to {path}...')
+            target.write_value(path, value, verify=False,
+                               as_root=target.conn.connected_as_root)
+
+        print('Reading values from target...')
+        raw_result = target.read_tree_values_flat(tempdir)
+        result = {os.path.basename(k): v for k, v in raw_result.items()}
+
+    print(f'Removing {target.working_directory}...')
+    target.remove(target.working_directory)
 
     assert {k: v.strip() for k, v in data.items()} == result
