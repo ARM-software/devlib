@@ -1015,19 +1015,19 @@ class Target(object):
         return await self.read_value.asyn(path, kind=boolean)
 
     @asyn.asynccontextmanager
-    async def revertable_write_value(self, path, value, verify=True):
+    async def revertable_write_value(self, path, value, verify=True, as_root=True):
         orig_value = self.read_value(path)
         try:
-            await self.write_value.asyn(path, value, verify)
+            await self.write_value.asyn(path, value, verify=verify, as_root=as_root)
             yield
         finally:
-            await self.write_value.asyn(path, orig_value, verify)
+            await self.write_value.asyn(path, orig_value, verify=verify, as_root=as_root)
 
     def batch_revertable_write_value(self, kwargs_list):
         return batch_contextmanager(self.revertable_write_value, kwargs_list)
 
     @asyn.asyncf
-    async def write_value(self, path, value, verify=True):
+    async def write_value(self, path, value, verify=True, as_root=True):
         self.async_manager.track_access(
             asyn.PathAccess(namespace='target', path=path, mode='w')
         )
@@ -1059,7 +1059,7 @@ fi
         cmd = cmd.format(busybox=quote(self.busybox), path=quote(path), value=quote(value))
 
         try:
-            await self.execute.asyn(cmd, check_exit_code=True, as_root=True)
+            await self.execute.asyn(cmd, check_exit_code=True, as_root=as_root)
         except TargetCalledProcessError as e:
             if e.returncode == 10:
                 raise TargetStableError('Could not write "{value}" to {path}: {e.output}'.format(
