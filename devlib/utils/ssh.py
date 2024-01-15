@@ -397,7 +397,8 @@ class SshConnection(SshConnectionBase):
 
         with _handle_paramiko_exceptions():
             client = SSHClient()
-            client.load_system_host_keys()
+            if self.strict_host_check:
+                client.load_system_host_keys()
             client.set_missing_host_key_policy(policy)
             client.connect(
                 hostname=self.host,
