@@ -15,3 +15,16 @@ LocalLinuxTarget:
     connection_settings:
       unrooted: True
 
+QEMUTargetRunner:
+  entry-0:
+    qemu_settings:
+      kernel_image: '/path/to/devlib/tools/buildroot/buildroot-v2023.11.1-aarch64/output/images/Image'
+
+  entry-1:
+    connection_settings:
+      port : 8023
+
+    qemu_settings:
+      kernel_image: '/path/to/devlib/tools/buildroot/buildroot-v2023.11.1-x86_64/output/images/bzImage'
+      arch: 'x86_64'
+      cmdline: 'console=ttyS0'

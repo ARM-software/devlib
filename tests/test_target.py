@@ -20,7 +20,7 @@ import os
 from pprint import pp
 import pytest
 
-from devlib import AndroidTarget, LinuxTarget, LocalLinuxTarget
+from devlib import AndroidTarget, LinuxTarget, LocalLinuxTarget, QEMUTargetRunner
 from devlib.utils.android import AdbConnection
 from devlib.utils.misc import load_struct_from_yaml
 
@@ -44,32 +44,49 @@ def build_targets():
                 connection_settings=entry['connection_settings'],
                 conn_cls=lambda **kwargs: AdbConnection(adb_as_root=True, **kwargs),
             )
-            targets.append(a_target)
+            targets.append((a_target, None))
 
     if target_configs.get('LinuxTarget') is not None:
         print('> Linux targets:')
         for entry in target_configs['LinuxTarget'].values():
             pp(entry)
             l_target = LinuxTarget(connection_settings=entry['connection_settings'])
-            targets.append(l_target)
+            targets.append((l_target, None))
 
     if target_configs.get('LocalLinuxTarget') is not None:
         print('> LocalLinux targets:')
         for entry in target_configs['LocalLinuxTarget'].values():
             pp(entry)
             ll_target = LocalLinuxTarget(connection_settings=entry['connection_settings'])
-            targets.append(ll_target)
+            targets.append((ll_target, None))
+
+    if target_configs.get('QEMUTargetRunner') is not None:
+        print('> QEMU target runners:')
+        for entry in target_configs['QEMUTargetRunner'].values():
+            pp(entry)
+            qemu_settings = entry.get('qemu_settings') and entry['qemu_settings']
+            connection_settings = entry.get(
+                'connection_settings') and entry['connection_settings']
+
+            qemu_runner = QEMUTargetRunner(
+                qemu_settings=qemu_settings,
+                connection_settings=connection_settings,
+            )
+            targets.append((qemu_runner.target, qemu_runner))
 
     return targets
 
 
-@pytest.mark.parametrize("target", build_targets())
-def test_read_multiline_values(target):
+@pytest.mark.parametrize("target, target_runner", build_targets())
+def test_read_multiline_values(target, target_runner):
     """
     Test Target.read_tree_values_flat()
 
     :param target: Type of target per :class:`Target` based classes.
     :type target: Target
+
+    :param target_runner: Target runner object to terminate target (if necessary).
+    :type target: TargetRunner
     """
 
     data = {
@@ -95,5 +112,9 @@ def test_read_multiline_values(target):
 
     print(f'Removing {target.working_directory}...')
     target.remove(target.working_directory)
+
+    if target_runner is not None:
+        print('Terminating target runner...')
+        target_runner.terminate()
 
     assert {k: v.strip() for k, v in data.items()} == result

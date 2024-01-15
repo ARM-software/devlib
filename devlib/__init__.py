@@ -22,6 +22,8 @@ from devlib.target import (
         ChromeOsTarget,
 )
 
+from devlib.target_runner import QEMUTargetRunner
+
 from devlib.host import (
         PACKAGE_BIN_DIRECTORY,
         LocalConnection,

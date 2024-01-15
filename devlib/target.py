@@ -494,7 +494,7 @@ class Target(object):
         # Check for platform dependent setup procedures
         self.platform.setup(self)
 
-        # Initialize modules which requires Buxybox (e.g. shutil dependent tasks)
+        # Initialize modules which requires Busybox (e.g. shutil dependent tasks)
         self._update_modules('setup')
 
         await self.execute.asyn('mkdir -p {}'.format(quote(self._file_transfer_cache)))
