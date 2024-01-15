@@ -476,7 +476,8 @@ class AdbConnection(ConnectionBase):
 
 def fastboot_command(command, timeout=None, device=None):
     target = '-s {}'.format(quote(device)) if device else ''
-    full_command = 'fastboot {} {}'.format(target, command)
+    bin_ = _ANDROID_ENV.get_env('fastboot')
+    full_command = f'{bin} {target} {command}'
     logger.debug(full_command)
     output, _ = check_output(full_command, timeout, shell=True)
     return output
