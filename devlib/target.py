@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2024 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import time
 import logging
 import posixpath
 import subprocess
-import sys
 import tarfile
 import tempfile
 import threading
@@ -35,7 +34,6 @@ import copy
 import inspect
 import itertools
 from collections import namedtuple, defaultdict
-from contextlib import contextmanager
 from past.builtins import long
 from past.types import basestring
 from numbers import Number
@@ -54,15 +52,14 @@ from devlib.platform import Platform
 from devlib.exception import (DevlibTransientError, TargetStableError,
                               TargetNotRespondingError, TimeoutError,
                               TargetTransientError, KernelConfigKeyError,
-                              TargetError, HostError, TargetCalledProcessError,
-                              TargetStableCalledProcessError)  # pylint: disable=redefined-builtin
+                              TargetError, HostError, TargetCalledProcessError)
 from devlib.utils.ssh import SshConnection
-from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, adb_disconnect, INTENT_FLAGS
+from devlib.utils.android import AdbConnection, AndroidProperties, LogcatMonitor, adb_command, INTENT_FLAGS
 from devlib.utils.misc import memoized, isiterable, convert_new_lines, groupby_value
 from devlib.utils.misc import commonprefix, merge_lists
 from devlib.utils.misc import ABI_MAP, get_cpu_name, ranges_to_list
 from devlib.utils.misc import batch_contextmanager, tls_property, _BoundTLSProperty, nullcontext
-from devlib.utils.misc import strip_bash_colors, safe_extract
+from devlib.utils.misc import safe_extract
 from devlib.utils.types import integer, boolean, bitmask, identifier, caseless_string, bytes_regex
 import devlib.utils.asyn as asyn
 

@@ -1,4 +1,4 @@
-#    Copyright 2013-2018 ARM Limited
+#    Copyright 2013-2024 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,23 +22,21 @@ from contextlib import contextmanager
 from functools import partial, reduce, wraps
 from itertools import groupby
 from operator import itemgetter
-from weakref import WeakKeyDictionary, WeakSet
+from weakref import WeakSet
 
 import ctypes
-import functools
 import logging
 import os
 import pkgutil
 import random
 import re
-import signal
 import string
 import subprocess
 import sys
 import threading
 import types
-import wrapt
 import warnings
+import wrapt
 
 
 try:
