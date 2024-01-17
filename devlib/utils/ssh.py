@@ -1,4 +1,4 @@
-#    Copyright 2014-2018 ARM Limited
+#    Copyright 2014-2024 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 #
 
 
-import glob
 import os
 import stat
 import logging
@@ -22,13 +21,11 @@ import subprocess
 import re
 import threading
 import tempfile
-import shutil
 import socket
 import sys
 import time
 import atexit
 import contextlib
-import weakref
 import select
 import copy
 import functools
@@ -60,8 +57,7 @@ from devlib.exception import (HostError, TargetStableError, TargetNotRespondingE
 from devlib.utils.misc import (which, strip_bash_colors, check_output,
                                sanitize_cmd_template, memoized, redirect_streams)
 from devlib.utils.types import boolean
-from devlib.connection import (ConnectionBase, ParamikoBackgroundCommand, PopenBackgroundCommand,
-                               SSHTransferHandle)
+from devlib.connection import ConnectionBase, ParamikoBackgroundCommand, SSHTransferHandle
 
 
 DEFAULT_SSH_SUDO_COMMAND = "sudo -k -p ' ' -S -- sh -c {}"
