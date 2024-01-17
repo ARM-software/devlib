@@ -505,7 +505,7 @@ class Target(object):
             self.hard_reset()  # pylint: disable=no-member
         else:
             if not self.is_connected:
-                message = 'Cannot reboot target becuase it is disconnected. ' +\
+                message = 'Cannot reboot target because it is disconnected. ' +\
                           'Either connect() first, or specify hard=True ' +\
                           '(in which case, a hard_reset module must be installed)'
                 raise TargetTransientError(message)
@@ -2970,9 +2970,11 @@ class ChromeOsTarget(LinuxTarget):
                            'total_transfer_timeout', 'poll_transfers',
                            'start_transfer_poll_delay']
         self.ssh_connection_settings = {}
-        for setting in ssh_conn_params:
-            if connection_settings.get(setting, None):
-                self.ssh_connection_settings[setting] = connection_settings[setting]
+        self.ssh_connection_settings.update(
+            (key, value)
+            for key, value in connection_settings.items()
+            if key in ssh_conn_params
+        )
 
         super(ChromeOsTarget, self).__init__(connection_settings=self.ssh_connection_settings,
                                              platform=platform,
@@ -2991,9 +2993,11 @@ class ChromeOsTarget(LinuxTarget):
         # Pull out adb connection settings
         adb_conn_params = ['device', 'adb_server', 'timeout']
         self.android_connection_settings = {}
-        for setting in adb_conn_params:
-            if connection_settings.get(setting, None):
-                self.android_connection_settings[setting] = connection_settings[setting]
+        self.android_connection_settings.update(
+            (key, value)
+            for key, value in connection_settings.items()
+            if key in adb_conn_params
+        )
 
         # If adb device is not explicitly specified use same as ssh host
         if not connection_settings.get('device', None):
