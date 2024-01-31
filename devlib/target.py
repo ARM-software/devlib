@@ -14,6 +14,7 @@
 #
 
 import asyncio
+from contextlib import contextmanager
 import io
 import base64
 import functools
@@ -1070,6 +1071,38 @@ fi
                 raise TargetStableError(message)
             else:
                 raise
+
+    @contextmanager
+    def make_temp(self, is_directory=True, directory='', prefix='devlib-test'):
+        """
+        Creates temporary file/folder on target and deletes it once it's done.
+
+        :param is_directory: Specifies if temporary object is a directory, defaults to True.
+        :type is_directory: bool, optional
+
+        :param directory: Temp object will be created under this directory,
+            defaults to :attr:`Target.working_directory`.
+        :type directory: str, optional
+
+        :param prefix: Prefix of temp object's name, defaults to 'devlib-test'.
+        :type prefix: str, optional
+
+        :yield: Full path of temp object.
+        :rtype: str
+        """
+
+        directory = directory or self.working_directory
+        temp_obj = None
+        try:
+            cmd = f'mktemp -p {directory} {prefix}-XXXXXX'
+            if is_directory:
+                cmd += ' -d'
+
+            temp_obj = self.execute(cmd).strip()
+            yield temp_obj
+        finally:
+            if temp_obj is not None:
+                self.remove(temp_obj)
 
     def reset(self):
         try:
