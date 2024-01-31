@@ -367,25 +367,32 @@ class SshConnection(SshConnectionBase):
         else:
             logger.debug('Using SFTP for file transfer')
 
-        self.client = self._make_client()
-        atexit.register(self.close)
+        self.client = None
+        try:
+            self.client = self._make_client()
+            atexit.register(self.close)
 
-        # Use a marker in the output so that we will be able to differentiate
-        # target connection issues with "password needed".
-        # Also, sudo might not be installed at all on the target (but
-        # everything will work as long as we login as root). If sudo is still
-        # needed, it will explode when someone tries to use it. After all, the
-        # user might not be interested in being root at all.
-        self._sudo_needs_password = (
-            'NEED_PASSWORD' in
-            self.execute(
-                # sudo -n is broken on some versions on MacOSX, revisit that if
-                # someone ever cares
-                'sudo -n true || echo NEED_PASSWORD',
-                as_root=False,
-                check_exit_code=False,
+            # Use a marker in the output so that we will be able to differentiate
+            # target connection issues with "password needed".
+            # Also, sudo might not be installed at all on the target (but
+            # everything will work as long as we login as root). If sudo is still
+            # needed, it will explode when someone tries to use it. After all, the
+            # user might not be interested in being root at all.
+            self._sudo_needs_password = (
+                'NEED_PASSWORD' in
+                self.execute(
+                    # sudo -n is broken on some versions on MacOSX, revisit that if
+                    # someone ever cares
+                    'sudo -n true || echo NEED_PASSWORD',
+                    as_root=False,
+                    check_exit_code=False,
+                )
             )
-        )
+
+        except BaseException:
+            if self.client is not None:
+                self.client.close()
+            raise
 
     def _make_client(self):
         if self.strict_host_check:
