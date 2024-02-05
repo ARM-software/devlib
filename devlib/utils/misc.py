@@ -23,6 +23,7 @@ from functools import partial, reduce, wraps
 from itertools import groupby
 from operator import itemgetter
 from weakref import WeakSet
+from ruamel.yaml import YAML
 
 import ctypes
 import logging
@@ -588,6 +589,30 @@ class LoadSyntaxError(Exception):
     def __str__(self):
         message = 'Syntax Error in {}, line {}:\n\t{}'
         return message.format(self.filepath, self.lineno, self.message)
+
+
+def load_struct_from_yaml(filepath):
+    """
+    Parses a config structure from a YAML file.
+    The structure should be composed of basic Python types.
+
+    :param filepath: Input file which contains YAML data.
+    :type filepath: str
+
+    :raises LoadSyntaxError: if there is a syntax error in YAML data.
+
+    :return: A dictionary which contains parsed YAML data
+    :rtype: Dict
+    """
+
+    try:
+        yaml = YAML(typ='safe', pure=True)
+        with open(filepath, 'r', encoding='utf-8') as file_handler:
+            return yaml.load(file_handler)
+    except yaml.YAMLError as ex:
+        message = ex.message if hasattr(ex, 'message') else ''
+        lineno = ex.problem_mark.line if hasattr(ex, 'problem_mark') else None
+        raise LoadSyntaxError(message, filepath=filepath, lineno=lineno) from ex
 
 
 RAND_MOD_NAME_LEN = 30
