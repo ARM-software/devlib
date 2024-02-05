@@ -102,6 +102,7 @@ params = dict(
         'wrapt',  # Basic for construction of decorator functions
         'numpy',
         'pandas',
+        'pytest',
         'lxml', # More robust xml parsing
         'nest_asyncio', # Allows running nested asyncio loops
         'future', # for the "past" Python package
