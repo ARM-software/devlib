@@ -2939,7 +2939,7 @@ def _get_part_name(section):
     variant = section.get('CPU variant', '0x0')
     name = get_cpu_name(*list(map(integer, [implementer, part, variant])))
     if name is None:
-        name = '{}/{}/{}'.format(implementer, part, variant)
+        name = f'{implementer}/{part}/{variant}'
     return name
 
 
@@ -2973,10 +2973,13 @@ def _build_path_tree(path_map, basepath, sep=os.path.sep, dictcls=dict):
 
 
 class ChromeOsTarget(LinuxTarget):
+    """
+    Class for interacting with ChromeOS targets.
+    """
 
     os = 'chromeos'
 
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-arguments
     def __init__(self,
                  connection_settings=None,
                  platform=None,
@@ -3009,17 +3012,17 @@ class ChromeOsTarget(LinuxTarget):
             if key in ssh_conn_params
         )
 
-        super(ChromeOsTarget, self).__init__(connection_settings=self.ssh_connection_settings,
-                                             platform=platform,
-                                             working_directory=working_directory,
-                                             executables_directory=executables_directory,
-                                             connect=False,
-                                             modules=modules,
-                                             load_default_modules=load_default_modules,
-                                             shell_prompt=shell_prompt,
-                                             conn_cls=SshConnection,
-                                             is_container=is_container,
-                                             max_async=max_async)
+        super().__init__(connection_settings=self.ssh_connection_settings,
+            platform=platform,
+            working_directory=working_directory,
+            executables_directory=executables_directory,
+            connect=False,
+            modules=modules,
+            load_default_modules=load_default_modules,
+            shell_prompt=shell_prompt,
+            conn_cls=SshConnection,
+            is_container=is_container,
+            max_async=max_async)
 
         # We can't determine if the target supports android until connected to the linux host so
         # create unconditionally.
@@ -3037,16 +3040,15 @@ class ChromeOsTarget(LinuxTarget):
             self.android_connection_settings['device'] = connection_settings.get('host', None)
 
         self.android_container = AndroidTarget(connection_settings=self.android_connection_settings,
-                                               platform=platform,
-                                               working_directory=android_working_directory,
-                                               executables_directory=android_executables_directory,
-                                               connect=False,
-                                               modules=[], # Only use modules with linux target
-                                               load_default_modules=False,
-                                               shell_prompt=shell_prompt,
-                                               conn_cls=AdbConnection,
-                                               package_data_directory=package_data_directory,
-                                               is_container=True)
+            platform=platform,
+            working_directory=android_working_directory,
+            executables_directory=android_executables_directory,
+            connect=False,
+            load_default_modules=False,
+            shell_prompt=shell_prompt,
+            conn_cls=AdbConnection,
+            package_data_directory=package_data_directory,
+            is_container=True)
         if connect:
             self.connect()
 
@@ -3056,15 +3058,15 @@ class ChromeOsTarget(LinuxTarget):
         if not present, use android implementation if available.
         """
         try:
-            return super(ChromeOsTarget, self).__getattribute__(attr)
+            return super().__getattribute__(attr)
         except AttributeError:
             if hasattr(self.android_container, attr):
                 return getattr(self.android_container, attr)
-            else:
-                raise
+            raise
 
-    def connect(self, timeout=30, check_boot_completed=True, max_async=None):
-        super(ChromeOsTarget, self).connect(
+    @asyn.asyncf
+    async def connect(self, timeout=30, check_boot_completed=True, max_async=None):
+        super().connect(
             timeout=timeout,
             check_boot_completed=check_boot_completed,
             max_async=max_async,
