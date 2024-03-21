@@ -1,5 +1,6 @@
 AndroidTarget:
   entry-0:
+    timeout: 60
     connection_settings:
       device: 'emulator-5554'
 

@@ -41,9 +41,11 @@ def build_targets():
         for entry in target_configs['AndroidTarget'].values():
             pp(entry)
             a_target = AndroidTarget(
+                connect=False,
                 connection_settings=entry['connection_settings'],
                 conn_cls=lambda **kwargs: AdbConnection(adb_as_root=True, **kwargs),
             )
+            a_target.connect(timeout=entry.get('timeout', 60))
             targets.append((a_target, None))
 
     if target_configs.get('LinuxTarget') is not None:
