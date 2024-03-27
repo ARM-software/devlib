@@ -20,7 +20,7 @@ import os
 from pprint import pp
 import pytest
 
-from devlib import AndroidTarget, LinuxTarget, LocalLinuxTarget, QEMUTargetRunner
+from devlib import AndroidTarget, ChromeOsTarget, LinuxTarget, LocalLinuxTarget, QEMUTargetRunner
 from devlib.utils.android import AdbConnection
 from devlib.utils.misc import load_struct_from_yaml
 
@@ -41,9 +41,11 @@ def build_targets():
         for entry in target_configs['AndroidTarget'].values():
             pp(entry)
             a_target = AndroidTarget(
+                connect=False,
                 connection_settings=entry['connection_settings'],
                 conn_cls=lambda **kwargs: AdbConnection(adb_as_root=True, **kwargs),
             )
+            a_target.connect(timeout=entry.get('timeout', 60))
             targets.append((a_target, None))
 
     if target_configs.get('LinuxTarget') is not None:
@@ -52,6 +54,16 @@ def build_targets():
             pp(entry)
             l_target = LinuxTarget(connection_settings=entry['connection_settings'])
             targets.append((l_target, None))
+
+    if target_configs.get('ChromeOsTarget') is not None:
+        print('> ChromeOS targets:')
+        for entry in target_configs['ChromeOsTarget'].values():
+            pp(entry)
+            c_target = ChromeOsTarget(
+                connection_settings=entry['connection_settings'],
+                working_directory='/tmp/devlib-target',
+            )
+            targets.append((c_target, None))
 
     if target_configs.get('LocalLinuxTarget') is not None:
         print('> LocalLinux targets:')
@@ -72,7 +84,24 @@ def build_targets():
                 qemu_settings=qemu_settings,
                 connection_settings=connection_settings,
             )
-            targets.append((qemu_runner.target, qemu_runner))
+
+            if entry.get('ChromeOsTarget') is None:
+                targets.append((qemu_runner.target, qemu_runner))
+                continue
+
+            # Leave termination of QEMU runner to ChromeOS target.
+            targets.append((qemu_runner.target, None))
+
+            print('> ChromeOS targets:')
+            pp(entry['ChromeOsTarget'])
+            c_target = ChromeOsTarget(
+                connection_settings={
+                    **entry['ChromeOsTarget']['connection_settings'],
+                    **qemu_runner.target.connection_settings,
+                },
+                working_directory='/tmp/devlib-target',
+            )
+            targets.append((c_target, qemu_runner))
 
     return targets
 

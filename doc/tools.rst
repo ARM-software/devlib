@@ -83,3 +83,27 @@ system, you may want to run commands similar to these:
 
 See https://buildroot.org/downloads/manual/manual.html for details.
 
+Docker support
+--------------
+
+A Docker image for devlib can be created via ``tools/docker/Dockerfile``.
+
+Once the Docker image is run, ``tools/docker/run_tests.sh`` script can execute
+tests for Android, Linux, LocalLinux, and QEMU targets.
+
+The Dockerfile forks from ``Ubuntu-22.04``, installs required system packages,
+checks out ``master`` branch of devlib, installs devlib, creates Android
+virtual devices via ``tools/android/install_base.sh``, and QEMU images for
+aarch64 and x86_84 architectures.
+
+Version Android command line tools (``CMDLINE_VERSION``), buildroot
+(``BUILDROOT_VERSION``) and devlib (``DEVLIB_REF``) branches can be customized
+for the Docker image via aforementioned environment variables.
+
+.. code:: shell
+
+   cd tools/docker
+   docker build -t devlib .
+   docker run -it --privileged devlib
+   /devlib/tools/docker/run_tests.sh
+

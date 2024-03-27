@@ -1,7 +1,16 @@
 AndroidTarget:
   entry-0:
+    timeout: 60
     connection_settings:
       device: 'emulator-5554'
+
+ChromeOsTarget:
+  entry-0:
+    connection_settings:
+      device: 'emulator-5556'
+      host: 'example.com'
+      username: 'username'
+      password: 'password'
 
 LinuxTarget:
   entry-0:
