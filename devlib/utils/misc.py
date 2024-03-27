@@ -655,6 +655,7 @@ def ranges_to_list(ranges_string):
 
 def list_to_ranges(values):
     """Converts a list, e.g ``[0,2,3,4]``, into a sysfs-style ranges string, e.g. ``"0,2-4"``"""
+    values = sorted(values)
     range_groups = []
     for _, g in groupby(enumerate(values), lambda i_x: i_x[0] - i_x[1]):
         range_groups.append(list(map(itemgetter(1), g)))
