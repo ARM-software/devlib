@@ -31,7 +31,7 @@ QEMUTargetRunner:
 
   entry-1:
     connection_settings:
-      port : 8023
+      port: 8023
 
     qemu_settings:
       kernel_image: '/path/to/devlib/tools/buildroot/buildroot-v2023.11.1-x86_64/output/images/bzImage'

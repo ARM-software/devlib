@@ -1081,10 +1081,10 @@ fi
         :type is_directory: bool, optional
 
         :param directory: Temp object will be created under this directory,
-            defaults to :attr:`Target.working_directory`.
+            defaults to ``Target.working_directory``.
         :type directory: str, optional
 
-        :param prefix: Prefix of temp object's name, defaults to 'devlib-test'.
+        :param prefix: Prefix of temp object's name.
         :type prefix: str, optional
 
         :yield: Full path of temp object.
@@ -1094,7 +1094,7 @@ fi
         directory = directory or self.working_directory
         temp_obj = None
         try:
-            cmd = f'mktemp -p {directory} {prefix}-XXXXXX'
+            cmd = f'mktemp -p {quote(directory)} {quote(prefix)}-XXXXXX'
             if is_directory:
                 cmd += ' -d'
 

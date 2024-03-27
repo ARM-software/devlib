@@ -38,4 +38,5 @@ sleep 30
 
 cd /devlib
 cp -f tools/docker/target_configs.yaml tests/
-python3 -m pytest -v -s ./tests/test_target.py
+python3 -m pytest --log-cli-level DEBUG ./tests/test_target.py
+
