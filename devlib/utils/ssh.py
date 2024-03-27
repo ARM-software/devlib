@@ -392,10 +392,13 @@ class SshConnection(SshConnectionBase):
                 )
             )
 
-        except BaseException:
-            if self.client is not None:
-                self.client.close()
-            raise
+        # pylint: disable=broad-except
+        except BaseException as e:
+            try:
+                if self.client is not None:
+                    self.client.close()
+            finally:
+                raise e
 
     def _make_client(self):
         if self.strict_host_check:
