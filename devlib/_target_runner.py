@@ -19,8 +19,6 @@ Target runner and related classes are implemented here.
 
 import logging
 import os
-import signal
-import subprocess
 import time
 from platform import machine
 
@@ -37,20 +35,20 @@ class TargetRunner:
     It mainly aims to provide framework support for QEMU like target runners
     (e.g., :class:`QEMUTargetRunner`).
 
-    :param runner_cmd: The command to start runner process (e.g.,
-        ``qemu-system-aarch64 -kernel Image -append "console=ttyAMA0" ...``).
-    :type runner_cmd: str
-
     :param target: Specifies type of target per :class:`Target` based classes.
     :type target: Target
 
+    :param runner_cmd: The command to start runner process (e.g.,
+        ``qemu-system-aarch64 -kernel Image -append "console=ttyAMA0" ...``).
+    :type runner_cmd: list(str) or None
+
     :param connect: Specifies if :class:`TargetRunner` should try to connect
         target after launching it, defaults to True.
-    :type connect: bool, optional
+    :type connect: bool or None
 
     :param boot_timeout: Timeout for target's being ready for SSH access in
         seconds, defaults to 60.
-    :type boot_timeout: int, optional
+    :type boot_timeout: int or None
 
     :raises HostError: if it cannot execute runner command successfully.
 
@@ -58,19 +56,23 @@ class TargetRunner:
     """
 
     def __init__(self,
-                 runner_cmd,
                  target,
+                 runner_cmd=None,
                  connect=True,
                  boot_timeout=60):
         self.boot_timeout = boot_timeout
         self.target = target
+        self.runner_process = None
 
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        if runner_cmd is None:
+            return
 
         self.logger.info('runner_cmd: %s', runner_cmd)
 
         try:
-            self.runner_process = get_subprocess(list(runner_cmd.split()))
+            self.runner_process = get_subprocess(runner_cmd)
         except Exception as ex:
             raise HostError(f'Error while running "{runner_cmd}": {ex}') from ex
 
@@ -91,7 +93,7 @@ class TargetRunner:
         """
         Exit routine for contextmanager.
 
-        Ensure :attr:`TargetRunner.runner_process` is terminated on exit.
+        Ensure ``TargetRunner.runner_process`` is terminated on exit.
         """
 
         self.terminate()
@@ -99,7 +101,7 @@ class TargetRunner:
     def wait_boot_complete(self):
         """
         Wait for target OS to finish boot up and become accessible over SSH in at most
-        :attr:`TargetRunner.boot_timeout` seconds.
+        ``TargetRunner.boot_timeout`` seconds.
 
         :raises TargetStableError: In case of timeout.
         """
@@ -109,10 +111,10 @@ class TargetRunner:
         while self.boot_timeout >= elapsed:
             try:
                 self.target.connect(timeout=self.boot_timeout - elapsed)
-                self.logger.info('Target is ready.')
+                self.logger.debug('Target is ready.')
                 return
             # pylint: disable=broad-except
-            except BaseException as ex:
+            except Exception as ex:
                 self.logger.info('Cannot connect target: %s', ex)
 
             time.sleep(1)
@@ -123,25 +125,41 @@ class TargetRunner:
 
     def terminate(self):
         """
-        Terminate :attr:`TargetRunner.runner_process`.
+        Terminate ``TargetRunner.runner_process``.
         """
 
         if self.runner_process is None:
             return
 
-        try:
-            self.runner_process.stdin.close()
-            self.runner_process.stdout.close()
-            self.runner_process.stderr.close()
+        self.logger.debug('Killing target runner...')
+        self.runner_process.kill()
 
-            if self.runner_process.poll() is None:
-                self.logger.debug('Terminating target runner...')
-                os.killpg(self.runner_process.pid, signal.SIGTERM)
-                # Wait 3 seconds before killing the runner.
-                self.runner_process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            self.logger.info('Killing target runner...')
-            os.killpg(self.runner_process.pid, signal.SIGKILL)
+
+class NOPTargetRunner(TargetRunner):
+    """
+    Class for implementing a target runner which does nothing except providing .target attribute.
+
+    :class:`NOPTargetRunner` is a subclass of :class:`TargetRunner` which is implemented only for
+    testing purposes.
+
+    :param target: Specifies type of target per :class:`Target` based classes.
+    :type target: Target
+    """
+
+    def __init__(self, target):
+        super().__init__(target=target)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+    def wait_boot_complete(self):
+        pass
+
+    def terminate(self):
+        pass
 
 
 class QEMUTargetRunner(TargetRunner):
@@ -181,12 +199,11 @@ class QEMUTargetRunner(TargetRunner):
     :type qemu_settings: Dict
 
     :param connection_settings: the dictionary to store connection settings
-        of :attr:`Target.connection_settings`, defaults to None.
-    :type connection_settings: Dict, optional
+        of ``Target.connection_settings``, defaults to None.
+    :type connection_settings: Dict or None
 
-    :param make_target: Lambda function for creating :class:`Target` based
-        object, defaults to :func:`lambda **kwargs: LinuxTarget(**kwargs)`.
-    :type make_target: func, optional
+    :param make_target: Lambda function for creating :class:`Target` based object.
+    :type make_target: func or None
 
     :Variable positional arguments: Forwarded to :class:`TargetRunner`.
 
@@ -196,9 +213,9 @@ class QEMUTargetRunner(TargetRunner):
     def __init__(self,
                  qemu_settings,
                  connection_settings=None,
-                 # pylint: disable=unnecessary-lambda
-                 make_target=lambda **kwargs: LinuxTarget(**kwargs),
+                 make_target=LinuxTarget,
                  **args):
+
         self.connection_settings = {
             'host': '127.0.0.1',
             'port': 8022,
@@ -206,62 +223,56 @@ class QEMUTargetRunner(TargetRunner):
             'password': 'root',
             'strict_host_check': False,
         }
-
-        if connection_settings is not None:
-            self.connection_settings = self.connection_settings | connection_settings
+        self.connection_settings = {**self.connection_settings, **(connection_settings or {})}
 
         qemu_args = {
-            'kernel_image': '',
             'arch': 'aarch64',
             'cpu_type': 'cortex-a72',
-            'initrd_image': '',
             'mem_size': 512,
             'num_cores': 2,
             'num_threads': 2,
             'cmdline': 'console=ttyAMA0',
             'enable_kvm': True,
         }
-
-        qemu_args = qemu_args | qemu_settings
+        qemu_args = {**qemu_args, **qemu_settings}
 
         qemu_executable = f'qemu-system-{qemu_args["arch"]}'
         qemu_path = which(qemu_executable)
         if qemu_path is None:
             raise FileNotFoundError(f'Cannot find {qemu_executable} executable!')
 
-        if not os.path.exists(qemu_args["kernel_image"]):
-            raise FileNotFoundError(f'{qemu_args["kernel_image"]} does not exist!')
+        if qemu_args.get("kernel_image"):
+            if not os.path.exists(qemu_args["kernel_image"]):
+                raise FileNotFoundError(f'{qemu_args["kernel_image"]} does not exist!')
+        else:
+            raise KeyError('qemu_settings must have kernel_image!')
 
-        # pylint: disable=consider-using-f-string
-        qemu_cmd = '''\
-{} -kernel {} -append "{}" -m {} -smp cores={},threads={} -netdev user,id=net0,hostfwd=tcp::{}-:22 \
--device virtio-net-pci,netdev=net0 --nographic\
-'''.format(
-            qemu_path,
-            qemu_args["kernel_image"],
-            qemu_args["cmdline"],
-            qemu_args["mem_size"],
-            qemu_args["num_cores"],
-            qemu_args["num_threads"],
-            self.connection_settings["port"],
-        )
+        qemu_cmd = [qemu_path,
+                    '-kernel', qemu_args["kernel_image"],
+                    '-append', f"'{qemu_args['cmdline']}'",
+                    '-m', str(qemu_args["mem_size"]),
+                    '-smp', f'cores={qemu_args["num_cores"]},threads={qemu_args["num_threads"]}',
+                    '-netdev', f'user,id=net0,hostfwd=tcp::{self.connection_settings["port"]}-:22',
+                    '-device', 'virtio-net-pci,netdev=net0',
+                    '--nographic',
+                    ]
 
-        if qemu_args["initrd_image"]:
+        if qemu_args.get("initrd_image"):
             if not os.path.exists(qemu_args["initrd_image"]):
                 raise FileNotFoundError(f'{qemu_args["initrd_image"]} does not exist!')
 
-            qemu_cmd += f' -initrd {qemu_args["initrd_image"]}'
+            qemu_cmd.extend(['-initrd', qemu_args["initrd_image"]])
 
-        if qemu_args["arch"] == machine():
+        if qemu_args['arch'].startswith('x86') and machine().startswith('x86'):
             if qemu_args["enable_kvm"]:
-                qemu_cmd += ' --enable-kvm'
+                qemu_cmd.append('--enable-kvm')
         else:
-            qemu_cmd += f' -machine virt -cpu {qemu_args["cpu_type"]}'
+            qemu_cmd.extend(['-machine', 'virt', '-cpu', qemu_args["cpu_type"]])
 
-        self.target = make_target(connect=False,
-                                  conn_cls=SshConnection,
-                                  connection_settings=self.connection_settings)
+        target = make_target(connect=False,
+                             conn_cls=SshConnection,
+                             connection_settings=self.connection_settings)
 
-        super().__init__(runner_cmd=qemu_cmd,
-                         target=self.target,
+        super().__init__(target=target,
+                         runner_cmd=qemu_cmd,
                          **args)

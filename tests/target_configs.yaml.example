@@ -1,7 +1,16 @@
 AndroidTarget:
   entry-0:
+    timeout: 60
     connection_settings:
       device: 'emulator-5554'
+
+ChromeOsTarget:
+  entry-0:
+    connection_settings:
+      device: 'emulator-5556'
+      host: 'example.com'
+      username: 'username'
+      password: 'password'
 
 LinuxTarget:
   entry-0:
@@ -22,7 +31,7 @@ QEMUTargetRunner:
 
   entry-1:
     connection_settings:
-      port : 8023
+      port: 8023
 
     qemu_settings:
       kernel_image: '/path/to/devlib/tools/buildroot/buildroot-v2023.11.1-x86_64/output/images/bzImage'
