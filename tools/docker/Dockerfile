@@ -61,9 +61,9 @@ RUN apt-get -y autoremove && \
 RUN git clone -b ${DEVLIB_REF} -v https://github.com/ARM-software/devlib.git /devlib
 RUN cd /devlib && pip install .[full]
 
-# Set CMDLINE_VERSION environment variable if you want to use a specific
-# version of Android command line tools rather than default which is
-# ``11076708`` as of writing this comment.
+# Set ANDROID_CMDLINE_VERSION environment variable if you want to use a
+# specific version of Android command line tools rather than default
+# which is ``11076708`` as of writing this comment.
 RUN cd /devlib/tools/android && ./install_base.sh
 
 # Set BUILDROOT_VERSION environment variable if you want to use a specific
