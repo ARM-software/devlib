@@ -29,6 +29,7 @@ import contextlib
 import select
 import copy
 import functools
+import shutil
 from shlex import quote
 from weakref import WeakMethod
 
