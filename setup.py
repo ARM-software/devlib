@@ -104,7 +104,7 @@ params = dict(
         'pandas',
         'pytest',
         'lxml', # More robust xml parsing
-        'nest_asyncio', # Allows running nested asyncio loops
+        'greenback', # Allows running nested asyncio loops
         'future', # for the "past" Python package
         'ruamel.yaml >= 0.15.72', # YAML formatted config parsing
     ],
