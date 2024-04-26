@@ -292,6 +292,14 @@ class memoized_method:
         self._name = name
 
 
+def run(coro):
+    """
+    Similar to :func:`asyncio.run` but can be called while an event loop is
+    running.
+    """
+    return asyncio.run(coro)
+
+
 def asyncf(f):
     """
     Decorator used to turn a coroutine into a blocking function, with an
@@ -328,14 +336,14 @@ def asyncf(f):
                     asyncgen = x.__aiter__()
                     while True:
                         try:
-                            yield asyncio.run(asyncgen.__anext__())
+                            yield run(asyncgen.__anext__())
                         except StopAsyncIteration:
                             return
 
                 return genf()
             else:
                 return await x
-        return asyncio.run(wrapper())
+        return run(wrapper())
 
     return _AsyncPolymorphicFunction(
         asyn=f,
@@ -358,10 +366,10 @@ class _AsyncPolymorphicCM:
         return self.cm.__aexit__(*args, **kwargs)
 
     def __enter__(self, *args, **kwargs):
-        return asyncio.run(self.cm.__aenter__(*args, **kwargs))
+        return run(self.cm.__aenter__(*args, **kwargs))
 
     def __exit__(self, *args, **kwargs):
-        return asyncio.run(self.cm.__aexit__(*args, **kwargs))
+        return run(self.cm.__aexit__(*args, **kwargs))
 
 
 def asynccontextmanager(f):
