@@ -521,6 +521,13 @@ class Target(object):
 
     def disconnect(self):
         connections = self._conn.get_all_values()
+        # Now that we have all the connection objects, we simply reset the TLS
+        # property so that the connections we got will not be reused anywhere.
+        del self._conn
+
+        unused_conns = self._unused_conns
+        self._unused_conns.clear()
+
         for conn in itertools.chain(connections, self._unused_conns):
             conn.close()
         if self._async_pool is not None:
