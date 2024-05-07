@@ -13,6 +13,7 @@
 # limitations under the License.
 #
 
+import atexit
 import asyncio
 from contextlib import contextmanager
 import io
@@ -40,6 +41,7 @@ from past.builtins import long
 from past.types import basestring
 from numbers import Number
 from shlex import quote
+from weakref import WeakMethod
 try:
     from collections.abc import Mapping
 except ImportError:
@@ -413,6 +415,10 @@ class Target(object):
         ))
         self._modules = modules
 
+        atexit.register(
+            WeakMethod(self.disconnect, atexit.unregister)
+        )
+
         self._update_modules('early')
         if connect:
             self.connect(max_async=max_async)
@@ -530,8 +536,11 @@ class Target(object):
 
         for conn in itertools.chain(connections, self._unused_conns):
             conn.close()
-        if self._async_pool is not None:
-            self._async_pool.__exit__(None, None, None)
+
+        pool = self._async_pool
+        self._async_pool = None
+        if pool is not None:
+            pool.__exit__(None, None, None)
 
     def __enter__(self):
         return self
