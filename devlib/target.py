@@ -526,6 +526,18 @@ class Target(object):
         if self._async_pool is not None:
             self._async_pool.__exit__(None, None, None)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self.disconnect()
+
+    async def __aenter__(self):
+        return self.__enter__()
+
+    async def __aexit__(self, *args, **kwargs):
+        return self.__exit__(*args, **kwargs)
+
     def get_connection(self, timeout=None):
         if self.conn_cls is None:
             raise ValueError('Connection class not specified on Target creation.')
