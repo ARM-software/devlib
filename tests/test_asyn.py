@@ -17,6 +17,7 @@
 import sys
 import asyncio
 from functools import partial
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
