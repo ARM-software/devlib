@@ -113,6 +113,9 @@ params = dict(
         'doc': ['sphinx'],
         'monsoon': ['python-gflags'],
         'acme': ['pandas', 'numpy'],
+        'dev': [
+            'uvloop', # Test async features under uvloop
+        ]
     },
     # https://pypi.python.org/pypi?%3Aaction=list_classifiers
     classifiers=[
