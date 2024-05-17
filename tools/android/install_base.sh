@@ -15,11 +15,23 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# Forked from https://github.com/ARM-software/lisa/blob/main/install_base.sh
-#
+
+# Script to install Android SDK tools for LISA & devlib on an Ubuntu-like
+# system.
 
 # shellcheck disable=SC2317
+
+ANDROID_HOME="$(dirname "${BASH_SOURCE[0]}")/android-sdk-linux"
+export ANDROID_HOME
+export ANDROID_USER_HOME="${ANDROID_HOME}/.android"
+
+ANDROID_CMDLINE_VERSION=${ANDROID_CMDLINE_VERSION:-"11076708"}
+
+# Android SDK is picky on Java version, so we need to set JAVA_HOME manually.
+# In most distributions, Java is installed under /usr/lib/jvm so use that.
+# according to the distribution
+ANDROID_SDK_JAVA_VERSION=17
+
 
 # Read standard /etc/os-release file and extract the needed field lsb_release
 # binary is not installed on all distro, but that file is found pretty much
@@ -54,14 +66,6 @@ get_android_sdk_host_arch() {
     echo "${arch}"
 }
 
-ANDROID_HOME="$(dirname "${0}")/android-sdk-linux"
-export ANDROID_HOME
-export ANDROID_USER_HOME="${ANDROID_HOME}/.android"
-
-mkdir -p "${ANDROID_HOME}/cmdline-tools"
-
-ANDROID_CMDLINE_VERSION=${ANDROID_CMDLINE_VERSION:-"11076708"}
-
 cleanup_android_home() {
     echo "Cleaning up Android SDK: ${ANDROID_HOME}"
     rm -rf "${ANDROID_HOME}"
@@ -90,10 +94,6 @@ install_android_sdk_manager() {
     readlink "${ANDROID_HOME}/skins" > /dev/null 2>&1 || ln -sf "../skins" "${ANDROID_HOME}/skins"
 }
 
-# Android SDK is picky on Java version, so we need to set JAVA_HOME manually.
-# In most distributions, Java is installed under /usr/lib/jvm so use that.
-# according to the distribution
-ANDROID_SDK_JAVA_VERSION=17
 find_java_home() {
     _JAVA_BIN=$(find -L /usr/lib/jvm -path "*${ANDROID_SDK_JAVA_VERSION}*/bin/java" -not -path '*/jre/bin/*' -print -quit)
     _JAVA_HOME=$(dirname "${_JAVA_BIN}")/../
@@ -171,15 +171,16 @@ install_pacman() {
 apt_packages=(
     cpu-checker
     libarchive-tools
-    wget
-    unzip
     qemu-user-static
+    wget
 )
 
 # pacman-based distributions like Archlinux or its derivatives
 pacman_packages=(
+    coreutils
     libarchive
     qemu-user-static
+    wget
 )
 
 # Detection based on the package-manager, so that it works on derivatives of
@@ -198,9 +199,7 @@ fi
 
 if [[ -n "${package_manager}" ]] && ! test_os_release NAME "${expected_distro}"; then
     unsupported_distro=1
-    echo
-    echo "INFO: the distribution seems based on ${package_manager} but is not ${expected_distro}, some package names might not be right"
-    echo
+    echo -e "\nINFO: the distribution seems based on ${package_manager} but is not ${expected_distro}, some package names might not be right\n"
 else
     unsupported_distro=0
 fi
@@ -247,7 +246,7 @@ for arg in "${args[@]}"; do
         )
         apt_packages+=(openjdk-"${ANDROID_SDK_JAVA_VERSION}"-jre openjdk-"${ANDROID_SDK_JAVA_VERSION}"-jdk)
         pacman_packages+=(jre"${ANDROID_SDK_JAVA_VERSION}"-openjdk jdk"${ANDROID_SDK_JAVA_VERSION}"-openjdk)
-        handled=1;
+        handled=1
         ;;&
 
     "--create-avds" | "--install-all")
@@ -293,6 +292,8 @@ ordered_functions=(
 # Remove duplicates in the list
 # shellcheck disable=SC2207
 install_functions=($(echo "${install_functions[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+
+mkdir -p "${ANDROID_HOME}/cmdline-tools"
 
 # Call all the hooks in the order of available_functions
 ret=0
