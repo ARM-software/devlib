@@ -66,6 +66,16 @@ get_android_sdk_host_arch() {
     echo "${arch}"
 }
 
+# No need for the whole SDK for this one
+install_android_platform_tools() {
+    echo "Installing Android Platform Tools ..."
+
+    local url="https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
+
+    echo "Downloading Android Platform Tools from: ${url}"
+    wget -qO- "${url}" | bsdtar -xf- -C "${ANDROID_HOME}/"
+}
+
 cleanup_android_home() {
     echo "Cleaning up Android SDK: ${ANDROID_HOME}"
     rm -rf "${ANDROID_HOME}"
@@ -235,6 +245,15 @@ for arg in "${args[@]}"; do
 
     "--cleanup-android-sdk")
         install_functions+=(cleanup_android_home)
+        handled=1
+        ;;&
+
+    # Not part of --install-all since that is already satisfied by
+    # --install-android-tools The advantage of that method is that it does not
+    # require the Java JDK/JRE to be installed, and is a bit quicker. However,
+    # it will not provide the build-tools which are needed by devlib.
+    "--install-android-platform-tools")
+        install_functions+=(install_android_platform_tools)
         handled=1
         ;;&
 
