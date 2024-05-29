@@ -99,9 +99,6 @@ install_android_sdk_manager() {
     chmod +x -R "${ANDROID_HOME}/cmdline-tools/latest/bin"
 
     yes | (call_android_sdkmanager --licenses || true)
-
-    echo "Creating the link to skins directory..."
-    readlink "${ANDROID_HOME}/skins" > /dev/null 2>&1 || ln -sf "../skins" "${ANDROID_HOME}/skins"
 }
 
 find_java_home() {
@@ -146,15 +143,15 @@ create_android_vds() {
     local vd_name
     vd_name="devlib-p6-12"
     echo "Creating virtual device \"${vd_name}\" (Pixel 6 - Android 12)..."
-    echo no | call_android_avdmanager -s create avd -n "${vd_name}" -k "system-images;android-31;google_apis;${android_sdk_host_arch}" --skin pixel_6 -b "${android_sdk_host_arch}" -f
+    echo no | call_android_avdmanager -s create avd -n "${vd_name}" -k "system-images;android-31;google_apis;${android_sdk_host_arch}" -b "${android_sdk_host_arch}" -f
 
     vd_name="devlib-p6-14"
     echo "Creating virtual device \"${vd_name}\" (Pixel 6 - Android 14)..."
-    echo no | call_android_avdmanager -s create avd -n "${vd_name}" -k "system-images;android-34;google_apis;${android_sdk_host_arch}" --skin pixel_6 -b "${android_sdk_host_arch}" -f
+    echo no | call_android_avdmanager -s create avd -n "${vd_name}" -k "system-images;android-34;google_apis;${android_sdk_host_arch}" -b "${android_sdk_host_arch}" -f
 
     vd_name="devlib-chromeos"
     echo "Creating virtual device \"${vd_name}\" (ChromeOS - Android 13, Pixel tablet)..."
-    echo no | call_android_avdmanager -s create avd -n "${vd_name}" -k "system-images;android-33;android-desktop;${android_sdk_host_arch}" --skin pixel_tablet -b "${android_sdk_host_arch}" -f
+    echo no | call_android_avdmanager -s create avd -n "${vd_name}" -k "system-images;android-33;android-desktop;${android_sdk_host_arch}" -b "${android_sdk_host_arch}" -f
 }
 
 install_apt() {
