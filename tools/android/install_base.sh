@@ -21,8 +21,10 @@
 
 # shellcheck disable=SC2317
 
-ANDROID_HOME="$(dirname "${BASH_SOURCE[0]}")/android-sdk-linux"
-export ANDROID_HOME
+if [[ -z ${ANDROID_HOME:-} ]]; then
+    ANDROID_HOME="$(dirname "${BASH_SOURCE[0]}")/android-sdk-linux"
+    export ANDROID_HOME
+fi
 export ANDROID_USER_HOME="${ANDROID_HOME}/.android"
 
 ANDROID_CMDLINE_VERSION=${ANDROID_CMDLINE_VERSION:-"11076708"}
@@ -122,15 +124,24 @@ call_android_avdmanager() {
     call_android_sdk avdmanager "$@"
 }
 
-# Needs install_android_sdk_manager first
-install_android_tools() {
-    local android_sdk_host_arch
-    android_sdk_host_arch=$(get_android_sdk_host_arch)
+install_build_tools() {
+    yes | call_android_sdkmanager --verbose --channel=0 --install "build-tools;34.0.0"
+}
 
+install_platform_tools() {
     yes | call_android_sdkmanager --verbose --channel=0 --install "platform-tools"
+}
+
+install_platforms() {
     yes | call_android_sdkmanager --verbose --channel=0 --install "platforms;android-31"
     yes | call_android_sdkmanager --verbose --channel=0 --install "platforms;android-33"
     yes | call_android_sdkmanager --verbose --channel=0 --install "platforms;android-34"
+}
+
+install_system_images() {
+    local android_sdk_host_arch
+    android_sdk_host_arch=$(get_android_sdk_host_arch)
+
     yes | call_android_sdkmanager --verbose --channel=0 --install "system-images;android-31;google_apis;${android_sdk_host_arch}"
     yes | call_android_sdkmanager --verbose --channel=0 --install "system-images;android-33;android-desktop;${android_sdk_host_arch}"
     yes | call_android_sdkmanager --verbose --channel=0 --install "system-images;android-34;google_apis;${android_sdk_host_arch}"
@@ -258,7 +269,8 @@ for arg in "${args[@]}"; do
         install_functions+=(
             find_java_home
             install_android_sdk_manager
-            install_android_tools
+            install_build_tools
+            install_platform_tools
         )
         apt_packages+=(openjdk-"${ANDROID_SDK_JAVA_VERSION}"-jre openjdk-"${ANDROID_SDK_JAVA_VERSION}"-jdk)
         pacman_packages+=(jre"${ANDROID_SDK_JAVA_VERSION}"-openjdk jdk"${ANDROID_SDK_JAVA_VERSION}"-openjdk)
@@ -269,7 +281,9 @@ for arg in "${args[@]}"; do
         install_functions+=(
             find_java_home
             install_android_sdk_manager
-            install_android_tools
+            install_platform_tools
+            install_platforms
+            install_system_images
             create_android_vds
         )
         handled=1
@@ -301,7 +315,11 @@ ordered_functions=(
     # cleanup must be done BEFORE installing
     cleanup_android_home
     install_android_sdk_manager
-    install_android_tools
+    install_android_platform_tools
+    install_build_tools
+    install_platform_tools
+    install_platforms
+    install_system_images
     create_android_vds
 )
 
