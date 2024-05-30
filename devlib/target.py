@@ -1153,8 +1153,8 @@ fi
             else:
                 raise
 
-    @contextmanager
-    def make_temp(self, is_directory=True, directory='', prefix='devlib-test'):
+    @asyn.asynccontextmanager
+    async def make_temp(self, is_directory=True, directory='', prefix='devlib-test'):
         """
         Creates temporary file/folder on target and deletes it once it's done.
 
@@ -1179,11 +1179,11 @@ fi
             if is_directory:
                 cmd += ' -d'
 
-            temp_obj = self.execute(cmd).strip()
+            temp_obj = (await self.execute.asyn(cmd)).strip()
             yield temp_obj
         finally:
             if temp_obj is not None:
-                self.remove(temp_obj)
+                await self.remove.asyn(temp_obj)
 
     def reset(self):
         try:
