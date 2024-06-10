@@ -562,7 +562,7 @@ def adb_disconnect(device, adb_server=None, adb_port=None):
         adb_cmd = get_adb_command(None, 'disconnect', adb_server, adb_port)
         command = "{} {}".format(adb_cmd, device)
         logger.debug(command)
-        retval = subprocess.call(command, stdout=open(os.devnull, 'wb'), shell=True)
+        retval = subprocess.call(command, stdout=subprocess.DEVNULL, shell=True)
         if retval:
             raise TargetTransientError('"{}" returned {}'.format(command, retval))
 
