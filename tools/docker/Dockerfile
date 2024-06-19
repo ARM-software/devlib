@@ -66,7 +66,7 @@ RUN cd /devlib && \
 # Set ANDROID_CMDLINE_VERSION environment variable if you want to use a
 # specific version of Android command line tools rather than default
 # which is ``11076708`` as of writing this comment.
-RUN cd /devlib/tools/android && ./install_base.sh
+RUN cd /devlib/tools/android && ./setup_host.sh
 
 # Set BUILDROOT_VERSION environment variable if you want to use a specific
 # branch of buildroot rather than default which is ``2023.11.1`` as of

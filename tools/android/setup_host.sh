@@ -17,7 +17,7 @@
 # limitations under the License.
 
 # Script to install Android SDK tools for LISA & devlib on an Ubuntu-like
-# system.
+# system and creates Android virtual devices.
 
 # shellcheck disable=SC2317
 
