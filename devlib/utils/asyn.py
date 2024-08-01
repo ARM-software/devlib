@@ -289,7 +289,7 @@ class memoized_method:
         raise RuntimeError("Cannot monkey-patch a memoized function")
 
     def __set_name__(self, owner, name):
-        self.name = name
+        self._name = name
 
 
 def asyncf(f):
