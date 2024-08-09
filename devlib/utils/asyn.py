@@ -198,6 +198,7 @@ class _AsyncPolymorphicFunction:
     def __init__(self, asyn, blocking):
         self.asyn = asyn
         self.blocking = blocking
+        functools.update_wrapper(self, asyn)
 
     def __get__(self, *args, **kwargs):
         return self.__class__(
