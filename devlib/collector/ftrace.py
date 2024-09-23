@@ -107,7 +107,8 @@ class FtraceCollector(CollectorBase):
         self.function_profile_file    = self.target.path.join(self.tracing_path, 'function_profile_enabled')
         self.marker_file              = self.target.path.join(self.tracing_path, 'trace_marker')
         self.ftrace_filter_file       = self.target.path.join(self.tracing_path, 'set_ftrace_filter')
-        self.available_tracers_file  = self.target.path.join(self.tracing_path, 'available_tracers')
+        self.available_tracers_file   = self.target.path.join(self.tracing_path, 'available_tracers')
+        self.kprobe_events            = self.target.path.join(self.tracing_path, 'kprobe_events')
 
         self.host_binary = which('trace-cmd')
         self.kernelshark = which('kernelshark')
@@ -240,6 +241,9 @@ class FtraceCollector(CollectorBase):
         return self.target.read_value(self.available_functions_file).splitlines()
 
     def reset(self):
+        # Save kprobe events
+        kprobe_events = self.target.read_value(self.kprobe_events)
+
         self.target.execute('{} reset -B devlib'.format(self.target_binary),
                             as_root=True, timeout=TIMEOUT)
 
@@ -256,6 +260,10 @@ class FtraceCollector(CollectorBase):
 
         if self.functions:
             self.target.write_value(self.function_profile_file, 0, verify=False)
+
+        # Restore kprobe events
+        self.target.write_value(self.kprobe_events, kprobe_events)
+
         self._reset_needed = False
 
     @asyncf
