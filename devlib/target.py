@@ -535,9 +535,17 @@ class Target(object):
         """
         Check that the connection works without obvious issues.
         """
-        out = await self.execute.asyn('true', as_root=False)
-        if out.strip():
-            raise TargetStableError('The shell seems to not be functional and adds content to stderr: {}'.format(out))
+        async def check(**kwargs):
+            out = await self.execute.asyn('true', **kwargs)
+            if out:
+                raise TargetStableError('The shell seems to not be functional and adds content to stderr: {!r}'.format(out))
+
+        await check(as_root=False)
+        # If we are rooted, we usually run with sudo. Unfortunately, PAM
+        # modules can write random text to stdout such as:
+        # Your password will expire in XXX days.
+        if self.is_rooted:
+            await check(as_root=True)
 
     def disconnect(self):
         connections = self._conn.get_all_values()
