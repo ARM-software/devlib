@@ -61,7 +61,8 @@ from devlib.utils.types import boolean
 from devlib.connection import ConnectionBase, ParamikoBackgroundCommand, SSHTransferHandle
 
 
-DEFAULT_SSH_SUDO_COMMAND = "sudo -k -p ' ' -S -- sh -c {}"
+# Empty prompt with -p '' to avoid adding a leading space to the output.
+DEFAULT_SSH_SUDO_COMMAND = "sudo -k -p '' -S -- sh -c {}"
 
 
 class _SSHEnv:
