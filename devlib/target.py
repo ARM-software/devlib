@@ -1340,7 +1340,7 @@ fi
             uuid=uuid.uuid4().hex,
             suffix=suffix,
         )
-        path = self.get_workpath(name)
+        path = self.path.join(self.tmp_directory, name)
         if (await self.file_exists.asyn(path)):
             raise FileExistsError('Path already exists on the target: {}'.format(path))
         else:
