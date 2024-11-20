@@ -904,7 +904,7 @@ class Target(object):
             for sources, dest in mapping.items():
                 for source in sources:
                     async with self._xfer_cache_path(source) as device_tempfile:
-                        await self.execute.asyn("cp -r -- {} {}".format(quote(source), quote(device_tempfile)), as_root=as_root)
+                        await self.execute.asyn("cp -rL -- {} {}".format(quote(source), quote(device_tempfile)), as_root=as_root)
                         await self.execute.asyn("{} chmod 0644 -- {}".format(self.busybox, quote(device_tempfile)), as_root=as_root)
                         do_pull([device_tempfile], dest)
         else:
