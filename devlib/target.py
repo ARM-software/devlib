@@ -320,6 +320,7 @@ class Target(object):
                  conn_cls=None,
                  is_container=False,
                  max_async=50,
+                 tmp_directory=None,
                  ):
 
         self._lock = threading.RLock()
@@ -347,6 +348,7 @@ class Target(object):
         self.connection_settings['platform'] = self.platform
         self.working_directory = working_directory
         self.executables_directory = executables_directory
+        self.tmp_directory = tmp_directory
         self.load_default_modules = load_default_modules
         self.shell_prompt = bytes_regex(shell_prompt)
         self.conn_cls = conn_cls
@@ -356,7 +358,6 @@ class Target(object):
         self._installed_modules = {}
         self._cache = {}
         self._shutils = None
-        self._file_transfer_cache = None
         self._max_async = max_async
         self.busybox = None
 
@@ -477,10 +478,35 @@ class Target(object):
             self.wait_boot_complete(timeout)
         self.check_connection()
         self._resolve_paths()
-        self.execute('mkdir -p {}'.format(quote(self.working_directory)))
-        self.execute('mkdir -p {}'.format(quote(self.executables_directory)))
+        assert self.working_directory
+        if self.executables_directory is None:
+            self.executables_directory = self.path.join(
+                self.working_directory,
+                'bin'
+            )
+
+        for path in (self.working_directory, self.executables_directory):
+            self.makedirs(path)
+
         self.busybox = self.install(os.path.join(PACKAGE_BIN_DIRECTORY, self.abi, 'busybox'), timeout=30)
         self.conn.busybox = self.busybox
+
+        # If neither the mktemp call nor _resolve_paths() managed to get a
+        # temporary directory, we just make one in the working directory.
+        if self.tmp_directory is None:
+            assert self.busybox
+            try:
+                tmp = await self.execute.asyn(f'{quote(self.busybox)} mktemp -d')
+            except Exception:
+                # Some Android platforms don't have a working mktemp unless
+                # TMPDIR is set, so we let AndroidTarget._resolve_paths() deal
+                # with finding a suitable location.
+                tmp = self.path.join(self.working_directory, 'tmp')
+            else:
+                tmp = tmp.strip()
+            self.tmp_directory = tmp
+        self.makedirs(self.tmp_directory)
+
         self._detect_max_async(max_async or self._max_async)
         self.platform.update_from_target(self)
         self._update_modules('connected')
@@ -602,8 +628,6 @@ class Target(object):
         # Initialize modules which requires Busybox (e.g. shutil dependent tasks)
         self._update_modules('setup')
 
-        await self.execute.asyn('mkdir -p {}'.format(quote(self._file_transfer_cache)))
-
     def reboot(self, hard=False, connect=True, timeout=180):
         if hard:
             if not self.has('hard_reset'):
@@ -637,24 +661,11 @@ class Target(object):
         Context manager to provide a unique path in the transfer cache with the
         basename of the given name.
         """
-        # Use a UUID to avoid race conditions on the target side
-        xfer_uuid = uuid.uuid4().hex
-        folder = self.path.join(self._file_transfer_cache, xfer_uuid)
         # Make sure basename will work on folders too
         name = os.path.normpath(name)
-        # Ensure the name is relative so that os.path.join() will actually
-        # join the paths rather than ignoring the first one.
-        name = './{}'.format(os.path.basename(name))
-
-        check_rm = False
-        try:
-            await self.makedirs.asyn(folder)
-            # Don't check the exit code as the folder might not even exist
-            # before this point, if creating it failed
-            check_rm = True
-            yield self.path.join(folder, name)
-        finally:
-            await self.execute.asyn('rm -rf -- {}'.format(quote(folder)), check_exit_code=check_rm)
+        name = os.path.basename(name)
+        async with self.make_temp() as tmp:
+            yield self.path.join(tmp, name)
 
     @asyn.asyncf
     async def _prepare_xfer(self, action, sources, dest, pattern=None, as_root=False):
@@ -968,15 +979,17 @@ class Target(object):
     # execution
 
     def _prepare_cmd(self, command, force_locale):
+        tmpdir = f'TMPDIR={quote(self.tmp_directory)}' if self.tmp_directory else ''
+
         # Force the locale if necessary for more predictable output
         if force_locale:
             # Use an explicit export so that the command is allowed to be any
             # shell statement, rather than just a command invocation
-            command = 'export LC_ALL={} && {}'.format(quote(force_locale), command)
+            command = f'export LC_ALL={quote(force_locale)} {tmpdir} && {command}'
 
         # Ensure to use deployed command when availables
         if self.executables_directory:
-            command = "export PATH={}:$PATH && {}".format(quote(self.executables_directory), command)
+            command = f"export PATH={quote(self.executables_directory)}:$PATH && {command}"
 
         return command
 
@@ -1802,6 +1815,7 @@ class LinuxTarget(Target):
                  conn_cls=SshConnection,
                  is_container=False,
                  max_async=50,
+                 tmp_directory=None,
                  ):
         super(LinuxTarget, self).__init__(connection_settings=connection_settings,
                                           platform=platform,
@@ -1813,7 +1827,9 @@ class LinuxTarget(Target):
                                           shell_prompt=shell_prompt,
                                           conn_cls=conn_cls,
                                           is_container=is_container,
-                                          max_async=max_async)
+                                          max_async=max_async,
+                                          tmp_directory=tmp_directory,
+                                          )
 
     def wait_boot_complete(self, timeout=10):
         pass
@@ -1895,10 +1911,8 @@ class LinuxTarget(Target):
 
     def _resolve_paths(self):
         if self.working_directory is None:
+            # This usually lands in the home directory
             self.working_directory = self.path.join(self.execute("pwd").strip(), 'devlib-target')
-        self._file_transfer_cache = self.path.join(self.working_directory, '.file-cache')
-        if self.executables_directory is None:
-            self.executables_directory = self.path.join(self.working_directory, 'bin')
 
 
 class AndroidTarget(Target):
@@ -2013,6 +2027,7 @@ class AndroidTarget(Target):
                  package_data_directory="/data/data",
                  is_container=False,
                  max_async=50,
+                 tmp_directory=None,
                  ):
         super(AndroidTarget, self).__init__(connection_settings=connection_settings,
                                             platform=platform,
@@ -2024,7 +2039,9 @@ class AndroidTarget(Target):
                                             shell_prompt=shell_prompt,
                                             conn_cls=conn_cls,
                                             is_container=is_container,
-                                            max_async=max_async)
+                                            max_async=max_async,
+                                            tmp_directory=tmp_directory,
+                                            )
         self.package_data_directory = package_data_directory
         self._init_logcat_lock()
 
@@ -2614,9 +2631,16 @@ class AndroidTarget(Target):
     def _resolve_paths(self):
         if self.working_directory is None:
             self.working_directory = self.path.join(self.external_storage, 'devlib-target')
-        self._file_transfer_cache = self.path.join(self.working_directory, '.file-cache')
+        if self.tmp_directory is None:
+            # Do not rely on the generic default here, as we need to provide an
+            # android-specific default in case it fails.
+            try:
+                tmp = self.execute(f'{quote(self.busybox)} mktemp -d')
+            except Exception:
+                tmp = '/data/local/tmp'
+            self.tmp_directory = tmp
         if self.executables_directory is None:
-            self.executables_directory = '/data/local/tmp/bin'
+            self.executables_directory = self.path.join(self.tmp_directory, 'bin')
 
     @asyn.asyncf
     async def _ensure_executables_directory_is_writable(self):
@@ -3091,6 +3115,7 @@ class LocalLinuxTarget(LinuxTarget):
                  conn_cls=LocalConnection,
                  is_container=False,
                  max_async=50,
+                 tmp_directory=None,
                  ):
         super(LocalLinuxTarget, self).__init__(connection_settings=connection_settings,
                                                platform=platform,
@@ -3102,14 +3127,13 @@ class LocalLinuxTarget(LinuxTarget):
                                                shell_prompt=shell_prompt,
                                                conn_cls=conn_cls,
                                                is_container=is_container,
-                                               max_async=max_async)
+                                               max_async=max_async,
+                                               tmp_directory=tmp_directory,
+                                               )
 
     def _resolve_paths(self):
         if self.working_directory is None:
             self.working_directory = '/tmp/devlib-target'
-        self._file_transfer_cache = self.path.join(self.working_directory, '.file-cache')
-        if self.executables_directory is None:
-            self.executables_directory = '/tmp/devlib-target/bin'
 
 
 def _get_model_name(section):
@@ -3180,6 +3204,7 @@ class ChromeOsTarget(LinuxTarget):
                  package_data_directory="/data/data",
                  is_container=False,
                  max_async=50,
+                 tmp_directory=None,
                  ):
 
         self.supports_android = None
@@ -3208,7 +3233,9 @@ class ChromeOsTarget(LinuxTarget):
             shell_prompt=shell_prompt,
             conn_cls=SshConnection,
             is_container=is_container,
-            max_async=max_async)
+            max_async=max_async,
+            tmp_directory=tmp_directory,
+            )
 
         # We can't determine if the target supports android until connected to the linux host so
         # create unconditionally.
@@ -3270,6 +3297,3 @@ class ChromeOsTarget(LinuxTarget):
     def _resolve_paths(self):
         if self.working_directory is None:
             self.working_directory = '/mnt/stateful_partition/devlib-target'
-        self._file_transfer_cache = self.path.join(self.working_directory, '.file-cache')
-        if self.executables_directory is None:
-            self.executables_directory = self.path.join(self.working_directory, 'bin')
