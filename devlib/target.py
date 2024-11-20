@@ -1191,7 +1191,7 @@ fi
                 raise
 
     @asyn.asynccontextmanager
-    async def make_temp(self, is_directory=True, directory='', prefix='devlib-test'):
+    async def make_temp(self, is_directory=True, directory=None, prefix=None):
         """
         Creates temporary file/folder on target and deletes it once it's done.
 
@@ -1209,10 +1209,11 @@ fi
         :rtype: str
         """
 
-        directory = directory or self.working_directory
+        directory = directory or self.tmp_directory
+        prefix = f'{prefix}-' if prefix else ''
         temp_obj = None
         try:
-            cmd = f'mktemp -p {quote(directory)} {quote(prefix)}-XXXXXX'
+            cmd = f'mktemp -p {quote(directory)} {quote(prefix)}XXXXXX'
             if is_directory:
                 cmd += ' -d'
 
