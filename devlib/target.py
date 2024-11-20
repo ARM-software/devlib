@@ -819,10 +819,11 @@ class Target(object):
 
         if as_root:
             for sources, dest in mapping.items():
-                for source in sources:
+                async def f(source):
                     async with self._xfer_cache_path(source) as device_tempfile:
                         do_push([source], device_tempfile)
                         await self.execute.asyn("mv -f -- {} {}".format(quote(device_tempfile), quote(dest)), as_root=True)
+                await self.async_manager.map_concurrently(f, sources)
         else:
             for sources, dest in mapping.items():
                 do_push(sources, dest)
@@ -897,11 +898,13 @@ class Target(object):
 
         if via_temp:
             for sources, dest in mapping.items():
-                for source in sources:
+                async def f(source):
                     async with self._xfer_cache_path(source) as device_tempfile:
-                        await self.execute.asyn(f"{quote(self.busybox)} cp -rL -- {quote(source)} {quote(device_tempfile)}", as_root=as_root)
-                        await self.execute.asyn(f"{quote(self.busybox)} chmod 0644 -- {quote(device_tempfile)}", as_root=as_root)
+                        cp_cmd = f"{quote(self.busybox)} cp -rL -- {quote(source)} {quote(device_tempfile)}"
+                        chmod_cmd = f"{quote(self.busybox)} chmod 0644 -- {quote(device_tempfile)}"
+                        await self.execute.asyn(f"{cp_cmd} && {chmod_cmd}", as_root=as_root)
                         do_pull([device_tempfile], dest)
+                await self.async_manager.map_concurrently(f, sources)
         else:
             for sources, dest in mapping.items():
                 do_pull(sources, dest)
