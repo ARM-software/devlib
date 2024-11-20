@@ -1310,8 +1310,10 @@ fi
         return self.path.join(self.working_directory, name)
 
     @asyn.asyncf
-    async def tempfile(self, prefix='', suffix=''):
-        name = '{prefix}_{uuid}_{suffix}'.format(
+    async def tempfile(self, prefix=None, suffix=None):
+        prefix = f'{prefix}-' if prefix else ''
+        suffix = f'-{suffix}' if suffix else ''
+        name = '{prefix}{uuid}{suffix}'.format(
             prefix=prefix,
             uuid=uuid.uuid4().hex,
             suffix=suffix,
