@@ -548,28 +548,23 @@ class Target(object):
             await check(as_root=True)
 
     def disconnect(self):
-        connections = self._conn.get_all_values()
-        # Now that we have all the connection objects, we simply reset the TLS
-        # property so that the connections we got will not be reused anywhere.
-        del self._conn
-
-        unused_conns = self._unused_conns
-        self._unused_conns.clear()
-
-        for conn in itertools.chain(connections, self._unused_conns):
-            conn.close()
-
-        pool = self._async_pool
-        self._async_pool = None
-        if pool is not None:
-            pool.__exit__(None, None, None)
-
         with self._lock:
-            connections = self._conn.get_all_values()
-            for conn in itertools.chain(connections, self._unused_conns):
+            thread_conns = self._conn.get_all_values()
+            # Now that we have all the connection objects, we simply reset the
+            # TLS property so that the connections we obtained will not be
+            # reused anywhere.
+            del self._conn
+
+            unused_conns = list(self._unused_conns)
+            self._unused_conns.clear()
+
+            for conn in itertools.chain(thread_conns, unused_conns):
                 conn.close()
-            if self._async_pool is not None:
-                self._async_pool.__exit__(None, None, None)
+
+            pool = self._async_pool
+            self._async_pool = None
+            if pool is not None:
+                pool.__exit__(None, None, None)
 
     def __enter__(self):
         return self
