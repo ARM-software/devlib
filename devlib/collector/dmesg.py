@@ -203,12 +203,16 @@ class DmesgCollector(CollectorBase):
             ))
         self.level = level
 
-        # Check if dmesg is the BusyBox one, or the one from util-linux in a
-        # recent version.
-        # Note: BusyBox dmesg does not support -h, but will still print the
-        # help with an exit code of 1
-        self.basic_dmesg = '--force-prefix' not in \
-                self.target.execute('dmesg -h', check_exit_code=False)
+        # Check if we have a dmesg from a recent util-linux build, rather than
+        # e.g. busybox's dmesg or the one shipped on some Android versions
+        # (toybox).  Note: BusyBox dmesg does not support -h, but will still
+        # print the help with an exit code of 1
+        help_ = self.target.execute('dmesg -h', check_exit_code=False)
+        self.basic_dmesg = not all(
+            opt in help_
+            for opt in ('--facility', '--force-prefix', '--decode', '--level')
+        )
+
         self.facility = facility
         try:
             needs_root = target.read_sysctl('kernel.dmesg_restrict')
