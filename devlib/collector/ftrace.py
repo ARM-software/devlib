@@ -324,9 +324,6 @@ class FtraceCollector(CollectorBase):
         if self.functions and self.tracer is None:
             self.target.execute('echo 0 > {}'.format(self.function_profile_file),
                                 as_root=True)
-        if 'cpufreq' in self.target.modules:
-            self.logger.debug('Trace CPUFreq frequencies')
-            self.target.cpufreq.trace_frequencies()
         self.stop_time = time.time()
         if self.automark:
             self.mark_stop()
