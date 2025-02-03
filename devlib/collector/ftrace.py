@@ -93,7 +93,6 @@ class FtraceCollector(CollectorBase):
         self.host_binary = None
         self.start_time = None
         self.stop_time = None
-        self.event_string = None
         self.function_string = None
         self.trace_clock = trace_clock
         self.saved_cmdlines_nr = saved_cmdlines_nr
@@ -195,7 +194,11 @@ class FtraceCollector(CollectorBase):
             elif self.tracer == 'function_graph':
                 self.function_string = _build_graph_functions(selected_functions, trace_children_functions)
 
-        self.event_string = _build_trace_events(selected_events)
+        self._selected_events = selected_events
+
+    @property
+    def event_string(self):
+        return _build_trace_events(self._selected_events)
 
     @classmethod
     def _resolve_tracing_path(cls, target, path):
@@ -270,6 +273,26 @@ class FtraceCollector(CollectorBase):
 
         self._reset_needed = False
 
+    def _trace_frequencies(self):
+        if 'cpu_frequency' in self._selected_events:
+            self.logger.debug('Trace CPUFreq frequencies')
+            try:
+                mod = self.target.cpufreq
+            except TargetStableError as e:
+                self.logger.error(f'Could not trace CPUFreq frequencies as the cpufreq module cannot be loaded: {e}')
+            else:
+                mod.trace_frequencies()
+
+    def _trace_idle(self):
+        if 'cpu_idle' in self._selected_events:
+            self.logger.debug('Trace CPUIdle states')
+            try:
+                mod = self.target.cpuidle
+            except TargetStableError as e:
+                self.logger.error(f'Could not trace CPUIdle states as the cpuidle module cannot be loaded: {e}')
+            else:
+                mod.perturb_cpus()
+
     @asyncf
     async def start(self):
         self.start_time = time.time()
@@ -302,12 +325,10 @@ class FtraceCollector(CollectorBase):
         )
         if self.automark:
             self.mark_start()
-        if 'cpufreq' in self.target.modules:
-            self.logger.debug('Trace CPUFreq frequencies')
-            self.target.cpufreq.trace_frequencies()
-        if 'cpuidle' in self.target.modules:
-            self.logger.debug('Trace CPUIdle states')
-            self.target.cpuidle.perturb_cpus()
+
+        self._trace_frequencies()
+        self._trace_idle()
+
         # Enable kernel function profiling
         if self.functions and self.tracer is None:
             target = self.target
