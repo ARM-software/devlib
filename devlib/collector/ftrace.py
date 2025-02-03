@@ -242,7 +242,10 @@ class FtraceCollector(CollectorBase):
 
     def reset(self):
         # Save kprobe events
-        kprobe_events = self.target.read_value(self.kprobe_events_file)
+        try:
+            kprobe_events = self.target.read_value(self.kprobe_events_file)
+        except TargetStableError:
+            kprobe_events = None
 
         self.target.execute('{} reset -B devlib'.format(self.target_binary),
                             as_root=True, timeout=TIMEOUT)
@@ -262,7 +265,8 @@ class FtraceCollector(CollectorBase):
             self.target.write_value(self.function_profile_file, 0, verify=False)
 
         # Restore kprobe events
-        self.target.write_value(self.kprobe_events_file, kprobe_events)
+        if kprobe_events:
+            self.target.write_value(self.kprobe_events_file, kprobe_events)
 
         self._reset_needed = False
 
