@@ -1900,12 +1900,11 @@ class LinuxTarget(Target):
             return
         try:
 
-            tmpfile = await self.tempfile.asyn()
-            cmd = 'DISPLAY=:0.0 scrot {} && {} date -u -Iseconds'
-            ts = (await self.execute.asyn(cmd.format(quote(tmpfile), quote(self.busybox)))).strip()
-            filepath = filepath.format(ts=ts)
-            await self.pull.asyn(tmpfile, filepath)
-            await self.remove.asyn(tmpfile)
+            async with self.make_temp(is_directory=False) as tmpfile:
+                cmd = 'DISPLAY=:0.0 scrot {} && {} date -u -Iseconds'
+                ts = (await self.execute.asyn(cmd.format(quote(tmpfile), quote(self.busybox)))).strip()
+                filepath = filepath.format(ts=ts)
+                await self.pull.asyn(tmpfile, filepath)
         except TargetStableError as e:
             if "Can't open X dispay." not in e.message:
                 raise e
