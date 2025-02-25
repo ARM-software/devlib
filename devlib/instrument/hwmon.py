@@ -1,4 +1,4 @@
-#    Copyright 2015-2017 ARM Limited
+#    Copyright 2015-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,15 +16,20 @@ import re
 
 from devlib.instrument import Instrument, Measurement, INSTANTANEOUS
 from devlib.exception import TargetStableError
+from typing import (Dict, Tuple, Callable, Union, TYPE_CHECKING,
+                    cast, List)
+from devlib.module.hwmon import HwmonModule, HwmonSensor
+if TYPE_CHECKING:
+    from devlib.target import Target
 
 
 class HwmonInstrument(Instrument):
 
-    name = 'hwmon'
-    mode = INSTANTANEOUS
+    name: str = 'hwmon'
+    mode: int = INSTANTANEOUS
 
     # sensor kind --> (meaure, standard unit conversion)
-    measure_map = {
+    measure_map: Dict[str, Tuple[str, Callable[[Union[int, float]], float]]] = {
         'temp': ('temperature', lambda x: x / 1000),
         'in': ('voltage', lambda x: x / 1000),
         'curr': ('current', lambda x: x / 1000),
@@ -32,16 +37,18 @@ class HwmonInstrument(Instrument):
         'energy': ('energy', lambda x: x / 1000000),
     }
 
-    def __init__(self, target):
+    def __init__(self, target: 'Target'):
         if not hasattr(target, 'hwmon'):
             raise TargetStableError('Target does not support HWMON')
         super(HwmonInstrument, self).__init__(target)
 
         self.logger.debug('Discovering available HWMON sensors...')
-        for ts in self.target.hwmon.sensors:
+        for ts in cast(HwmonModule, self.target.hwmon).sensors:
             try:
                 ts.get_file('input')
-                measure = self.measure_map.get(ts.kind)[0]
+                measure_map = self.measure_map.get(ts.kind)
+                if measure_map:
+                    measure: str = measure_map[0]
                 if measure:
                     self.logger.debug('\tAdding sensor {}'.format(ts.name))
                     self.add_channel(_guess_site(ts), measure, sensor=ts)
@@ -52,16 +59,16 @@ class HwmonInstrument(Instrument):
                 self.logger.debug(message.format(ts.name))
                 continue
 
-    def take_measurement(self):
-        result = []
+    def take_measurement(self) -> List[Measurement]:
+        result: List[Measurement] = []
         for chan in self.active_channels:
-            convert = self.measure_map[chan.sensor.kind][1]
-            value = convert(chan.sensor.get('input'))
+            convert = self.measure_map[chan.sensor.kind][1]  # type: ignore
+            value = convert(chan.sensor.get('input'))  # type: ignore
             result.append(Measurement(value, chan))
         return result
 
 
-def _guess_site(sensor):
+def _guess_site(sensor: HwmonSensor):
     """
     HWMON does not specify a standard for labeling its sensors, or for
     device/item split (the implication is that each hwmon device a separate chip
@@ -74,7 +81,7 @@ def _guess_site(sensor):
         # If no label has been specified for the sensor (in which case, it
         # defaults to the sensor's name), assume that the "site" of the sensor
         # is identified by the HWMON device
-        text = sensor.device.name
+        text: str = sensor.device.name
     else:
         # If a label has been specified, assume multiple sensors controlled by
         # the same device and the label identifies the site.

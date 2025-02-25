@@ -1,4 +1,4 @@
-#    Copyright 2024 ARM Limited
+#    Copyright 2024-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +20,22 @@ Target runner and related classes are implemented here.
 import logging
 import os
 import time
+
 from platform import machine
+from typing import Optional, cast, Protocol, TYPE_CHECKING, TypedDict, Union
+from typing_extensions import NotRequired, LiteralString
+if TYPE_CHECKING:
+    from _typeshed import StrPath, BytesPath
+    from devlib.platform import Platform
+else:
+    StrPath = str
+    BytesPath = bytes
 
 from devlib.exception import (TargetStableError, HostError)
-from devlib.target import LinuxTarget
+from devlib.target import LinuxTarget, Target
 from devlib.utils.misc import get_subprocess, which
 from devlib.utils.ssh import SshConnection
+from devlib.utils.annotation_helpers import SubprocessCommand, SshUserConnectionSettings
 
 
 class TargetRunner:
@@ -40,15 +50,22 @@ class TargetRunner:
     """
 
     def __init__(self,
-                 target):
+                 target: Target) -> None:
         self.target = target
-
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def __enter__(self):
+        """
+        Enter the context for this runner.
+        :return: This runner instance.
+        :rtype: TargetRunner
+        """
         return self
 
     def __exit__(self, *_):
+        """
+        Exit the context for this runner.
+        """
         pass
 
 
@@ -77,20 +94,20 @@ class SubprocessTargetRunner(TargetRunner):
     """
 
     def __init__(self,
-                 runner_cmd,
-                 target,
-                 connect=True,
-                 boot_timeout=60):
+                 runner_cmd: SubprocessCommand,
+                 target: Target,
+                 connect: bool = True,
+                 boot_timeout: int = 60):
         super().__init__(target=target)
 
-        self.boot_timeout = boot_timeout
+        self.boot_timeout: int = boot_timeout
 
         self.logger.info('runner_cmd: %s', runner_cmd)
 
         try:
             self.runner_process = get_subprocess(runner_cmd)
         except Exception as ex:
-            raise HostError(f'Error while running "{runner_cmd}": {ex}') from ex
+            raise HostError(f'Error while running "{runner_cmd!r}": {ex}') from ex
 
         if connect:
             self.wait_boot_complete()
@@ -107,16 +124,16 @@ class SubprocessTargetRunner(TargetRunner):
 
         self.terminate()
 
-    def wait_boot_complete(self):
+    def wait_boot_complete(self) -> None:
         """
-        Wait for target OS to finish boot up and become accessible over SSH in at most
-        ``SubprocessTargetRunner.boot_timeout`` seconds.
+        Wait for the target OS to finish booting and become accessible within
+        :attr:`boot_timeout` seconds.
 
-        :raises TargetStableError: In case of timeout.
+        :raises TargetStableError: If the target is inaccessible after the timeout.
         """
 
         start_time = time.time()
-        elapsed = 0
+        elapsed: float = 0.0
         while self.boot_timeout >= elapsed:
             try:
                 self.target.connect(timeout=self.boot_timeout - elapsed)
@@ -132,9 +149,9 @@ class SubprocessTargetRunner(TargetRunner):
         self.terminate()
         raise TargetStableError(f'Target is inaccessible for {self.boot_timeout} seconds!')
 
-    def terminate(self):
+    def terminate(self) -> None:
         """
-        Terminate ``SubprocessTargetRunner.runner_process``.
+        Terminate the subprocess associated with this runner.
         """
 
         self.logger.debug('Killing target runner...')
@@ -150,7 +167,7 @@ class NOPTargetRunner(TargetRunner):
     :type target: Target
     """
 
-    def __init__(self, target):
+    def __init__(self, target: Target) -> None:
         super().__init__(target=target)
 
     def __enter__(self):
@@ -159,11 +176,63 @@ class NOPTargetRunner(TargetRunner):
     def __exit__(self, *_):
         pass
 
-    def terminate(self):
+    def terminate(self) -> None:
         """
         Nothing to terminate for NOP target runners.
         Defined to be compliant with other runners (e.g., ``SubprocessTargetRunner``).
         """
+        pass
+
+
+QEMUTargetUserSettings = TypedDict("QEMUTargetUserSettings", {
+    'kernel_image': str,
+    'arch': NotRequired[str],
+    'cpu_type': NotRequired[str],
+    'initrd_image': str,
+    'mem_size': NotRequired[int],
+    'num_cores': NotRequired[int],
+    'num_threads': NotRequired[int],
+    'cmdline': NotRequired[str],
+    'enable_kvm': NotRequired[bool],
+})
+
+QEMUTargetRunnerSettings = TypedDict("QEMUTargetRunnerSettings", {
+    'kernel_image': str,
+    'arch': str,
+    'cpu_type': str,
+    'initrd_image': str,
+    'mem_size': int,
+    'num_cores': int,
+    'num_threads': int,
+    'cmdline': str,
+    'enable_kvm': bool,
+})
+
+
+SshConnectionSettings = TypedDict("SshConnectionSettings", {
+    'username': str,
+    'password': str,
+    'keyfile': Optional[Union[LiteralString, StrPath, BytesPath]],
+    'host': str,
+    'port': int,
+    'timeout': float,
+    'platform': 'Platform',
+    'sudo_cmd': str,
+    'strict_host_check': bool,
+    'use_scp': bool,
+    'poll_transfers': bool,
+    'start_transfer_poll_delay': int,
+    'total_transfer_timeout': int,
+    'transfer_poll_period': int,
+})
+
+
+class QEMUTargetRunnerTargetFactory(Protocol):
+    """
+    Protocol for Lambda function for creating :class:`Target` based object.
+    """
+    def __call__(self, *, connect: bool, conn_cls, connection_settings: SshConnectionSettings) -> Target:
+        ...
 
 
 class QEMUTargetRunner(SubprocessTargetRunner):
@@ -177,7 +246,7 @@ class QEMUTargetRunner(SubprocessTargetRunner):
 
         * ``arch``: Architecture type. Defaults to ``aarch64``.
 
-        * ``cpu_types``: List of CPU ids for QEMU. The list only contains ``cortex-a72`` by
+        * ``cpu_type``: List of CPU ids for QEMU. The list only contains ``cortex-a72`` by
             default. This parameter is valid for Arm architectures only.
 
         * ``initrd_image``: This points to the location of initrd image (e.g.,
@@ -212,21 +281,25 @@ class QEMUTargetRunner(SubprocessTargetRunner):
     """
 
     def __init__(self,
-                 qemu_settings,
-                 connection_settings=None,
-                 make_target=LinuxTarget,
-                 **args):
+                 qemu_settings: QEMUTargetUserSettings,
+                 connection_settings: Optional[SshUserConnectionSettings] = None,
+                 make_target: QEMUTargetRunnerTargetFactory = cast(QEMUTargetRunnerTargetFactory, LinuxTarget),
+                 **args) -> None:
 
-        self.connection_settings = {
+        default_connection_settings = {
             'host': '127.0.0.1',
             'port': 8022,
             'username': 'root',
             'password': 'root',
             'strict_host_check': False,
         }
-        self.connection_settings = {**self.connection_settings, **(connection_settings or {})}
 
-        qemu_args = {
+        self.connection_settings: SshConnectionSettings = cast(SshConnectionSettings, {
+            **default_connection_settings,
+            **(connection_settings or {})
+        })
+
+        qemu_default_args = {
             'arch': 'aarch64',
             'cpu_type': 'cortex-a72',
             'mem_size': 512,
@@ -235,7 +308,7 @@ class QEMUTargetRunner(SubprocessTargetRunner):
             'cmdline': 'console=ttyAMA0',
             'enable_kvm': True,
         }
-        qemu_args = {**qemu_args, **qemu_settings}
+        qemu_args: QEMUTargetRunnerSettings = cast(QEMUTargetRunnerSettings, {**qemu_default_args, **qemu_settings})
 
         qemu_executable = f'qemu-system-{qemu_args["arch"]}'
         qemu_path = which(qemu_executable)

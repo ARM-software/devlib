@@ -1,4 +1,4 @@
-#    Copyright 2024 ARM Limited
+#    Copyright 2024-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,8 +23,12 @@ from devlib.collector import (CollectorBase, CollectorOutput,
 from devlib.exception import TargetStableError
 from devlib.utils.misc import memoized
 
+from typing import (Pattern, Optional, Match, Tuple, List,
+                    Union, Any, Generator, TYPE_CHECKING)
+if TYPE_CHECKING:
+    from devlib.target import Target
 
-_LOGGER = logging.getLogger('dmesg')
+_LOGGER: logging.Logger = logging.getLogger('dmesg')
 
 
 class KernelLogEntry(object):
@@ -49,11 +53,12 @@ class KernelLogEntry(object):
     :type line_nr: int
     """
 
-    _TIMESTAMP_MSG_REGEX = re.compile(r'\[(.*?)\] (.*)')
-    _RAW_LEVEL_REGEX = re.compile(r'<([0-9]+)>(.*)')
-    _PRETTY_LEVEL_REGEX = re.compile(r'\s*([a-z]+)\s*:([a-z]+)\s*:\s*(.*)')
+    _TIMESTAMP_MSG_REGEX: Pattern[str] = re.compile(r'\[(.*?)\] (.*)')
+    _RAW_LEVEL_REGEX: Pattern[str] = re.compile(r'<([0-9]+)>(.*)')
+    _PRETTY_LEVEL_REGEX: Pattern[str] = re.compile(r'\s*([a-z]+)\s*:([a-z]+)\s*:\s*(.*)')
 
-    def __init__(self, facility, level, timestamp, msg, line_nr=0):
+    def __init__(self, facility: Optional[str], level: str,
+                 timestamp: timedelta, msg: str, line_nr: int = 0):
         self.facility = facility
         self.level = level
         self.timestamp = timestamp
@@ -61,7 +66,7 @@ class KernelLogEntry(object):
         self.line_nr = line_nr
 
     @classmethod
-    def from_str(cls, line, line_nr=0):
+    def from_str(cls, line: str, line_nr: int = 0) -> 'KernelLogEntry':
         """
         Parses a "dmesg --decode" output line, formatted as following:
         kern  :err   : [3618282.310743] nouveau 0000:01:00.0: systemd-logind[988]: nv50cal_space: -16
@@ -69,10 +74,18 @@ class KernelLogEntry(object):
         Or the more basic output given by "dmesg -r":
         <3>[3618282.310743] nouveau 0000:01:00.0: systemd-logind[988]: nv50cal_space: -16
 
+        :param line: A string from dmesg.
+        :type line: str
+        :param line_nr: The line number in the overall log.
+        :type line_nr: int
+        :raises ValueError: If the line format is invalid.
+        :return: A constructed :class:`KernelLogEntry`.
+        :rtype: KernelLogEntry
+
         """
 
-        def parse_raw_level(line):
-            match = cls._RAW_LEVEL_REGEX.match(line)
+        def parse_raw_level(line: str) -> Tuple[str, Union[str, Any]]:
+            match: Optional[Match[str]] = cls._RAW_LEVEL_REGEX.match(line)
             if not match:
                 raise ValueError(f'dmesg entry format not recognized: {line}')
             level, remainder = match.groups()
@@ -81,15 +94,15 @@ class KernelLogEntry(object):
             level = levels[int(level) % len(levels)]
             return level, remainder
 
-        def parse_pretty_level(line):
-            match = cls._PRETTY_LEVEL_REGEX.match(line)
+        def parse_pretty_level(line: str) -> Tuple[str, str, str]:
+            match: Optional[Match[str]] = cls._PRETTY_LEVEL_REGEX.match(line)
             if not match:
                 raise ValueError(f'dmesg entry pretty format not recognized: {line}')
             facility, level, remainder = match.groups()
             return facility, level, remainder
 
-        def parse_timestamp_msg(line):
-            match = cls._TIMESTAMP_MSG_REGEX.match(line)
+        def parse_timestamp_msg(line: str) -> Tuple[timedelta, str]:
+            match: Optional[Match[str]] = cls._TIMESTAMP_MSG_REGEX.match(line)
             if not match:
                 raise ValueError(f'dmesg entry timestamp format not recognized: {line}')
             timestamp, msg = match.groups()
@@ -101,7 +114,7 @@ class KernelLogEntry(object):
         # If we can parse the raw prio directly, that is a basic line
         try:
             level, remainder = parse_raw_level(line)
-            facility = None
+            facility: Optional[str] = None
         except ValueError:
             facility, level, remainder = parse_pretty_level(line)
 
@@ -116,21 +129,26 @@ class KernelLogEntry(object):
         )
 
     @classmethod
-    def from_dmesg_output(cls, dmesg_out, error=None):
+    def from_dmesg_output(cls, dmesg_out: Optional[str], error: Optional[str] = None) -> Generator['KernelLogEntry', Any, None]:
         """
         Return a generator of :class:`KernelLogEntry` for each line of the
         output of dmesg command.
+
+        :param dmesg_out: The dmesg output to parse.
+        :type dmesg_out - str
 
         :param error: If ``"raise"`` or ``None``, an exception will be raised
             if a parsing error occurs. If ``"warn"``, it will be logged at
             WARNING level. If ``"ignore"``, it will be ignored. If a callable
             is passed, the exception will be passed to it.
         :type error: str or None or typing.Callable[[BaseException], None]
+        :return: A generator of parsed :class:`KernelLogEntry` objects.
+        :rtype: Generator[KernelLogEntry, Any, None]
 
         .. note:: The same restrictions on the dmesg output format as for
             :meth:`from_str` apply.
         """
-        for i, line in enumerate(dmesg_out.splitlines()):
+        for i, line in enumerate(dmesg_out.splitlines() if dmesg_out else ''):
             if line.strip():
                 try:
                     yield cls.from_str(line, line_nr=i)
@@ -160,6 +178,9 @@ class DmesgCollector(CollectorBase):
     """
     Dmesg output collector.
 
+    :param target: The devlib Target (must be rooted).
+    :type target:Target
+
     :param level: Minimum log level to enable. All levels that are more
         critical will be collected as well.
     :type level: str
@@ -172,13 +193,15 @@ class DmesgCollector(CollectorBase):
         so it's not recommended unless it's really necessary.
     :type empty_buffer: bool
 
+    :param parse_error: A string to be appended to error lines if parse fails.
+    :type parse_error : str
     .. warning:: If BusyBox dmesg is used, facility and level will be ignored,
         and the parsed entries will also lack that information.
     """
 
     # taken from "dmesg --help"
     # This list needs to be ordered by priority
-    LOG_LEVELS = [
+    LOG_LEVELS: List[str] = [
         "emerg",        # system is unusable
         "alert",        # action must be taken immediately
         "crit",         # critical conditions
@@ -189,13 +212,15 @@ class DmesgCollector(CollectorBase):
         "debug",        # debug-level messages
     ]
 
-    def __init__(self, target, level=LOG_LEVELS[-1], facility='kern', empty_buffer=False, parse_error=None):
+    def __init__(self, target: 'Target', level: str = LOG_LEVELS[-1],
+                 facility: str = 'kern', empty_buffer: bool = False,
+                 parse_error: Optional[str] = None):
         super(DmesgCollector, self).__init__(target)
 
         if not target.is_rooted:
             raise TargetStableError('Cannot collect dmesg on non-rooted target')
 
-        self.output_path = None
+        self.output_path: Optional[str] = None
 
         if level not in self.LOG_LEVELS:
             raise ValueError('level needs to be one of: {}'.format(
@@ -207,42 +232,48 @@ class DmesgCollector(CollectorBase):
         # e.g. busybox's dmesg or the one shipped on some Android versions
         # (toybox).  Note: BusyBox dmesg does not support -h, but will still
         # print the help with an exit code of 1
-        help_ = self.target.execute('dmesg -h', check_exit_code=False)
-        self.basic_dmesg = not all(
+        help_: str = self.target.execute('dmesg -h', check_exit_code=False)
+        self.basic_dmesg: bool = not all(
             opt in help_
             for opt in ('--facility', '--force-prefix', '--decode', '--level')
         )
 
         self.facility = facility
         try:
-            needs_root = target.read_sysctl('kernel.dmesg_restrict')
+            needs_root: bool = target.read_sysctl('kernel.dmesg_restrict')
         except ValueError:
             needs_root = True
         else:
             needs_root = bool(int(needs_root))
         self.needs_root = needs_root
 
-        self._begin_timestamp = None
-        self.empty_buffer = empty_buffer
-        self._dmesg_out = None
-        self._parse_error = parse_error
+        self._begin_timestamp: Optional[timedelta] = None
+        self.empty_buffer: bool = empty_buffer
+        self._dmesg_out: Optional[str] = None
+        self._parse_error: Optional[str] = parse_error
 
     @property
-    def dmesg_out(self):
-        out = self._dmesg_out
+    def dmesg_out(self) -> Optional[str]:
+        """
+        get the dmesg output
+        """
+        out: Optional[str] = self._dmesg_out
         if out is None:
             return None
         else:
             try:
-                entry = self.entries[0]
+                entry: KernelLogEntry = self.entries[0]
             except IndexError:
                 return ''
             else:
-                i = entry.line_nr
+                i: int = entry.line_nr
                 return '\n'.join(out.splitlines()[i:])
 
     @property
-    def entries(self):
+    def entries(self) -> List[KernelLogEntry]:
+        """
+        get the entries as a list of class:KernelLogEntry
+        """
         return self._get_entries(
             self._dmesg_out,
             self._begin_timestamp,
@@ -250,14 +281,15 @@ class DmesgCollector(CollectorBase):
         )
 
     @memoized
-    def _get_entries(self, dmesg_out, timestamp, error):
-        entries = KernelLogEntry.from_dmesg_output(dmesg_out, error=error)
-        entries = list(entries)
+    def _get_entries(self, dmesg_out: Optional[str], timestamp: Optional[timedelta],
+                     error: Optional[str]) -> List[KernelLogEntry]:
+        entry_ = KernelLogEntry.from_dmesg_output(dmesg_out, error=error)
+        entries = list(entry_)
         if timestamp is None:
             return entries
         else:
             try:
-                first = entries[0]
+                first: KernelLogEntry = entries[0]
             except IndexError:
                 pass
             else:
@@ -273,14 +305,17 @@ class DmesgCollector(CollectorBase):
                 if entry.timestamp > timestamp
             ]
 
-    def _get_output(self):
-        levels_list = list(takewhile(
+    def _get_output(self) -> None:
+        """
+        get the dmesg collector output into _dmesg_out local variable
+        """
+        levels_list: List[str] = list(takewhile(
             lambda level: level != self.level,
             self.LOG_LEVELS
         ))
         levels_list.append(self.level)
         if self.basic_dmesg:
-            cmd = 'dmesg -r'
+            cmd: str = 'dmesg -r'
         else:
             cmd = 'dmesg --facility={facility} --force-prefix --decode --level={levels}'.format(
                 levels=','.join(levels_list),
@@ -289,10 +324,17 @@ class DmesgCollector(CollectorBase):
 
         self._dmesg_out = self.target.execute(cmd, as_root=self.needs_root)
 
-    def reset(self):
+    def reset(self) -> None:
+        """
+        Reset the collector's internal state (e.g., cached dmesg output).
+        """
         self._dmesg_out = None
 
-    def start(self):
+    def start(self) -> None:
+        """
+        Start collecting dmesg logs. If ``empty_buffer`` is true, clear them first.
+        :raises TargetStableError: If the target is not rooted.
+        """
         # If the buffer is emptied on start(), it does not matter as we will
         # not end up with entries dating from before start()
         if self.empty_buffer:
@@ -307,13 +349,23 @@ class DmesgCollector(CollectorBase):
             else:
                 self._begin_timestamp = entry.timestamp
 
-    def stop(self):
+    def stop(self) -> None:
+        """
+        Stop collecting logs and retrieve the latest dmesg output.
+        """
         self._get_output()
 
-    def set_output(self, output_path):
+    def set_output(self, output_path: str) -> None:
         self.output_path = output_path
 
-    def get_data(self):
+    def get_data(self) -> CollectorOutput:
+        """
+        Write the dmesg output to :attr:`output_path` and return a :class:`CollectorOutput`.
+
+        :raises RuntimeError: If :attr:`output_path` is unset.
+        :return: A collector output referencing the saved dmesg file.
+        :rtype: CollectorOutput
+        """
         if self.output_path is None:
             raise RuntimeError("Output path was not set.")
         with open(self.output_path, 'wt') as f:
