@@ -1,4 +1,4 @@
-#    Copyright 2023 ARM Limited
+#    Copyright 2023-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,9 @@ from devlib.host import PACKAGE_BIN_DIRECTORY
 from devlib.collector import (CollectorBase, CollectorOutput,
                               CollectorOutputEntry)
 from devlib.exception import TargetStableError, HostError
+from typing import TYPE_CHECKING, Optional
+if TYPE_CHECKING:
+    from devlib.target import Target, BackgroundCommand
 
 OUTPUT_PERFETTO_TRACE = 'devlib-trace.perfetto-trace'
 
@@ -53,29 +56,33 @@ class PerfettoCollector(CollectorBase):
 
     For more information consult the official documentation:
     https://perfetto.dev/docs/
+
+    :param target: The devlib Target.
+    :param config: Path to a Perfetto text config (proto) if any.
+    :param force_tracebox: If True, force usage of tracebox instead of native Perfetto.
     """
 
-    def __init__(self, target, config=None, force_tracebox=False):
+    def __init__(self, target: 'Target', config: Optional[str] = None, force_tracebox: bool = False):
         super().__init__(target)
-        self.bg_cmd = None
+        self.bg_cmd: Optional['BackgroundCommand'] = None
         self.config = config
-        self.target_binary = 'perfetto'
-        target_output_path = self.target.working_directory
+        self.target_binary: str = 'perfetto'
+        target_output_path: Optional[str] = self.target.working_directory
 
-        install_tracebox = force_tracebox or (target.os in ['linux', 'android'] and not target.is_running('traced'))
+        install_tracebox: bool = force_tracebox or (target.os in ['linux', 'android'] and not target.is_running('traced'))
 
         # Install Perfetto through tracebox
         if install_tracebox:
             self.target_binary = 'tracebox'
             if not self.target.get_installed(self.target_binary):
-                host_executable = os.path.join(PACKAGE_BIN_DIRECTORY,
-                                               self.target.abi, self.target_binary)
+                host_executable: str = os.path.join(PACKAGE_BIN_DIRECTORY,
+                                                    self.target.abi, self.target_binary)
                 if not os.path.exists(host_executable):
                     raise HostError("{} not found on the host".format(self.target_binary))
                 self.target.install(host_executable)
         # Use Android's built-in Perfetto
         elif target.os == 'android':
-            os_version = target.os_version['release']
+            os_version: str = target.os_version['release']
             if int(os_version) >= 9:
                 # Android requires built-in Perfetto to write to this directory
                 target_output_path = '/data/misc/perfetto-traces'
@@ -85,9 +92,14 @@ class PerfettoCollector(CollectorBase):
 
         self.target_output_file = target.path.join(target_output_path, OUTPUT_PERFETTO_TRACE)
 
-    def start(self):
-        cmd = "{} cat {} | {} --txt -c - -o {}".format(
-            quote(self.target.busybox), quote(self.config), quote(self.target_binary), quote(self.target_output_file)
+    def start(self) -> None:
+        """
+        Start Perfetto tracing by feeding the config to the perfetto (or tracebox) binary.
+
+        :raises TargetStableError: If perfetto/tracebox cannot be started on the target.
+        """
+        cmd: str = "{} cat {} | {} --txt -c - -o {}".format(
+            quote(self.target.busybox or ''), quote(self.config or ''), quote(self.target_binary), quote(self.target_output_file)
         )
         # start tracing
         if self.bg_cmd is None:
@@ -95,17 +107,32 @@ class PerfettoCollector(CollectorBase):
         else:
             raise TargetStableError('Perfetto collector is not re-entrant')
 
-    def stop(self):
-        # stop tracing
-        self.bg_cmd.cancel()
-        self.bg_cmd = None
+    def stop(self) -> None:
+        """
+        Stop Perfetto tracing and finalize the trace file.
+        """
+        if self.bg_cmd:
+            # stop tracing
+            self.bg_cmd.cancel()
+            self.bg_cmd = None
 
-    def set_output(self, output_path):
+    def set_output(self, output_path: str) -> None:
+        """
+        Specify where the trace file will be pulled on the host.
+
+        :param output_path: The file path or directory on the host.
+        """
         if os.path.isdir(output_path):
             output_path = os.path.join(output_path, os.path.basename(self.target_output_file))
         self.output_path = output_path
 
-    def get_data(self):
+    def get_data(self) -> CollectorOutput:
+        """
+        Pull the trace file from the target and return a :class:`CollectorOutput`.
+
+        :raises RuntimeError: If :attr:`output_path` is unset or if no trace file exists.
+        :return: A collector output referencing the Perfetto trace file.
+        """
         if self.output_path is None:
             raise RuntimeError("Output path was not set.")
         if not self.target.file_exists(self.target_output_file):

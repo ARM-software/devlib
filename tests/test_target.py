@@ -1,5 +1,5 @@
 #
-#    Copyright 2024 ARM Limited
+#    Copyright 2024-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,27 +23,26 @@ https://docs.pytest.org/en/7.1.x/how-to/logging.html#live-logs for logging detai
 $ python -m pytest --log-cli-level DEBUG test_target.py
 """
 
-import logging
 import os
+from typing import Optional
+
 import pytest
 
 from devlib import AndroidTarget, ChromeOsTarget, LinuxTarget, LocalLinuxTarget
 from devlib._target_runner import NOPTargetRunner, QEMUTargetRunner
 from devlib.utils.android import AdbConnection
-from devlib.utils.misc import load_struct_from_yaml
+from devlib.utils.misc import load_struct_from_yaml, get_logger
 
 
-logger = logging.getLogger('test_target')
+logger = get_logger('test_target')
 
 
-def get_class_object(name):
+def get_class_object(name: str) -> Optional[object]:
     """
     Get associated class object from string formatted class name
 
     :param name: Class name
-    :type name: str
     :return: Class object
-    :rtype: object or None
     """
     if globals().get(name) is None:
         return None

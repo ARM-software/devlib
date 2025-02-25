@@ -16,16 +16,15 @@
 
 import re
 import time
-import logging
-from copy import copy
 
-from past.builtins import basestring
+from copy import copy
 
 from devlib.utils.serial_port import write_characters, TIMEOUT
 from devlib.utils.types import boolean
+from devlib.utils.misc import get_logger
 
 
-logger = logging.getLogger('UEFI')
+logger = get_logger('UEFI')
 
 
 class UefiConfig(object):
@@ -134,7 +133,7 @@ class UefiMenu(object):
                       long-running operation.
 
         """
-        if isinstance(option, basestring):
+        if isinstance(option, str):
             option = self.get_option_index(option, timeout)
         self.enter(option)
 
