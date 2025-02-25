@@ -15,12 +15,11 @@
 #
 import re
 import time
-import logging
 
 from devlib.utils.serial_port import TIMEOUT
+from devlib.utils.misc import get_logger
 
-
-logger = logging.getLogger('U-Boot')
+logger = get_logger('U-Boot')
 
 
 class UbootMenu(object):

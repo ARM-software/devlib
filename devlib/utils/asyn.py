@@ -1,4 +1,4 @@
-#    Copyright 2013-2018 ARM Limited
+#    Copyright 2013-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,24 +30,46 @@ import os.path
 import inspect
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
-from weakref import WeakSet, WeakKeyDictionary
+from concurrent.futures import ThreadPoolExecutor, Future
+from weakref import WeakSet
 
 from greenlet import greenlet
+from typing import (Any, Callable, TypeVar, Type,
+                    Optional, Coroutine, Tuple, Dict, cast, Set,
+                    List, Union, AsyncContextManager,
+                    Iterable, Awaitable)
+from collections.abc import AsyncGenerator, Generator
+from asyncio import Task, AbstractEventLoop
+from inspect import Signature, BoundArguments
+from contextvars import Context
+from queue import SimpleQueue
+from threading import local
 
 
-def create_task(awaitable, name=None):
+def create_task(awaitable: Awaitable, name: Optional[str] = None) -> Task:
+    """
+    Create a new asyncio Task from an awaitable and set its name.
+
+    :param awaitable: A coroutine or awaitable object to schedule.
+    :param name: An optional name for the task. If None, attempts to use the awaitable's __qualname__.
+    :returns: The created asyncio Task.
+    """
     if isinstance(awaitable, asyncio.Task):
-        task = awaitable
+        task: Task = awaitable
     else:
-        task = asyncio.create_task(awaitable)
+        task = asyncio.create_task(cast(Coroutine, awaitable))
     if name is None:
         name = getattr(awaitable, '__qualname__', None)
-    task.name = name
+    task.set_name(name)
     return task
 
 
-def _close_loop(loop):
+def _close_loop(loop: Optional[AbstractEventLoop]) -> None:
+    """
+    Close an asyncio event loop after shutting down asynchronous generators and the default executor.
+
+    :param loop: The event loop to close, or None.
+    """
     if loop is not None:
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
@@ -62,55 +84,71 @@ def _close_loop(loop):
 
 
 class AsyncManager:
-    def __init__(self):
-        self.task_tree = dict()
-        self.resources = dict()
+    """
+    Manages asynchronous operations by tracking tasks and ensuring that concurrently
+    running asynchronous functions do not interfere with one another.
 
-    def track_access(self, access):
+    This manager maintains a mapping of tasks to resources and allows running tasks
+    concurrently while checking for overlapping resource usage.
+    """
+    def __init__(self) -> None:
+        """
+        Initialize the AsyncManager with empty task trees and resource maps.
+        """
+        self.task_tree: Dict[Task, Set[Task]] = dict()
+        self.resources: Dict[Task, Set['ConcurrentAccessBase']] = dict()
+
+    def track_access(self, access: 'ConcurrentAccessBase') -> None:
         """
         Register the given ``access`` to have been handled by the current
         async task.
 
         :param access: Access that were done.
-        :type access: ConcurrentAccessBase
 
         This allows :func:`concurrently` to check that concurrent tasks did not
         step on each other's toes.
         """
         try:
-            task = asyncio.current_task()
+            task: Optional[Task] = asyncio.current_task()
         except RuntimeError:
             pass
         else:
-            self.resources.setdefault(task, set()).add(access)
+            if task:
+                self.resources.setdefault(task, set()).add(access)
 
-    async def concurrently(self, awaitables):
+    async def concurrently(self, awaitables: Iterable[Awaitable]) -> List[Any]:
         """
         Await concurrently for the given awaitables, and cancel them as soon as
         one raises an exception.
+
+        :param awaitables: An iterable of coroutine objects to run concurrently.
+        :returns: A list with the results of the awaitables.
+        :raises Exception: Propagates the first exception encountered, canceling the others.
         """
-        awaitables = list(awaitables)
+        awaitables_list: List[Awaitable] = list(awaitables)
 
         # Avoid creating asyncio.Tasks when it's not necessary, as it will
         # disable a the blocking path optimization of Target._execute_async()
         # that uses blocking calls as long as there is only one asyncio.Task
         # running on the event loop.
-        if len(awaitables) == 1:
-            return [await awaitables[0]]
+        if len(awaitables_list) == 1:
+            return [await awaitables_list[0]]
 
-        tasks = list(map(create_task, awaitables))
+        tasks: List[Task] = list(map(create_task, awaitables_list))
 
-        current_task = asyncio.current_task()
-        task_tree = self.task_tree
+        current_task: Optional[Task] = asyncio.current_task()
+        task_tree: Dict[Task, Set[Task]] = self.task_tree
 
         try:
-            node = task_tree[current_task]
+            if current_task:
+                node: Set[Task] = task_tree[current_task]
         except KeyError:
-            is_root_task = True
+            is_root_task: bool = True
             node = set()
         else:
             is_root_task = False
-        task_tree[current_task] = node
+        if current_task:
+            task_tree[current_task] = node
 
         task_tree.update({
             child: set()
@@ -126,8 +164,12 @@ class AsyncManager:
             raise
         finally:
 
-            def get_children(task):
-                immediate_children = task_tree[task]
+            def get_children(task: Task) -> frozenset[Task]:
+                """
+                get the children of the task and their children etc and return as a
+                single set
+                """
+                immediate_children: Set[Task] = task_tree[task]
                 return frozenset(
                     itertools.chain(
                         [task],
@@ -140,7 +182,7 @@ class AsyncManager:
 
             # Get the resources created during the execution of each subtask
             # (directly or indirectly)
-            resources = {
+            resources: Dict[Task, frozenset['ConcurrentAccessBase']] = {
                 task: frozenset(
                     itertools.chain.from_iterable(
                         self.resources.get(child, [])
@@ -153,18 +195,20 @@ class AsyncManager:
                 for res1, res2 in itertools.product(resources1, resources2):
                     if issubclass(res2.__class__, res1.__class__) and res1.overlap_with(res2):
                         raise RuntimeError(
-                            'Overlapping resources manipulated in concurrent async tasks: {} (task {}) and {} (task {})'.format(res1, task1.name, res2, task2.name)
+                            'Overlapping resources manipulated in concurrent async tasks: {} (task {}) and {} (task {})'.format(res1, task1.get_name(), res2, task2.get_name())
                         )
 
             if is_root_task:
                 self.resources.clear()
                 task_tree.clear()
 
-    async def map_concurrently(self, f, keys):
+    async def map_concurrently(self, f: Callable, keys: Any) -> Dict:
         """
         Similar to :meth:`concurrently`,
         but maps the given function ``f`` on the given ``keys``.
 
+        :param f: The function to apply to each key.
+        :param keys: An iterable of keys.
         :return: A dictionary with ``keys`` as keys, and function result as
             values.
         """
@@ -175,12 +219,15 @@ class AsyncManager:
         ))
 
 
-def compose(*coros):
+def compose(*coros: Callable) -> Callable[..., Coroutine]:
     """
     Compose coroutines, feeding the output of each as the input of the next
     one.
 
     ``await compose(f, g)(x)`` is equivalent to ``await f(await g(x))``
+
+    :param coros: A variable number of coroutine functions.
+    :returns: A callable that, when awaited, composes the coroutines in sequence.
 
     .. note:: In Haskell, ``compose f g h`` would be equivalent to ``f <=< g <=< h``
     """
@@ -205,8 +252,11 @@ class _AsyncPolymorphicFunction:
     When called, the blocking synchronous operation is called. The ```asyn``
     attribute gives access to the asynchronous version of the function, and all
     the other attribute access will be redirected to the async function.
+
+    :param asyn: The asynchronous version of the function.
+    :param blocking: The synchronous (blocking) version of the function.
     """
-    def __init__(self, asyn, blocking):
+    def __init__(self, asyn: Callable[..., Awaitable], blocking: Callable[..., Any]):
         self.asyn = asyn
         self.blocking = blocking
         functools.update_wrapper(self, asyn)
@@ -240,36 +290,45 @@ class memoized_method:
         * non-async methods
         * method already decorated with :func:`devlib.asyn.asyncf`.
 
+    :param f: The method to memoize.
+
     .. note:: This decorator does not rely on hacks to hash unhashable data. If
         such input is required, it will either have to be coerced to a hashable
         first (e.g. converting a list to a tuple), or the code of
         :func:`devlib.asyn.memoized_method` will have to be updated to do so.
     """
-    def __init__(self, f):
-        memo = self
+    def __init__(self, f: Callable):
+        memo: 'memoized_method' = self
 
-        sig = inspect.signature(f)
+        sig: Signature = inspect.signature(f)
 
-        def bind(self, *args, **kwargs):
-            bound = sig.bind(self, *args, **kwargs)
+        def bind(self, *args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...],
+                                                           Tuple[Any, ...],
+                                                           Dict[str, Any]]:
+            """
+            bind arguments to function signature
+            """
+            bound: BoundArguments = sig.bind(self, *args, **kwargs)
             bound.apply_defaults()
             key = (bound.args[1:], tuple(sorted(bound.kwargs.items())))
 
             return (key, bound.args, bound.kwargs)
 
-        def get_cache(self):
+        def get_cache(self) -> Dict[Tuple[Any, ...], Any]:
             try:
-                cache = self.__dict__[memo.name]
+                cache: Dict[Tuple[Any, ...], Any] = self.__dict__[memo.name]
             except KeyError:
                 cache = {}
                 self.__dict__[memo.name] = cache
             return cache
 
-
         if inspect.iscoroutinefunction(f):
             @functools.wraps(f)
-            async def wrapper(self, *args, **kwargs):
-                cache = get_cache(self)
+            async def async_wrapper(self, *args: Any, **kwargs: Any) -> Any:
+                """
+                wrapper for async functions
+                """
+                cache: Dict[Tuple[Any, ...], Any] = get_cache(self)
                 key, args, kwargs = bind(self, *args, **kwargs)
                 try:
                     return cache[key]
@@ -277,9 +336,13 @@ class memoized_method:
                     x = await f(*args, **kwargs)
                     cache[key] = x
                     return x
+            self.f: Callable[..., Coroutine] = async_wrapper
         else:
             @functools.wraps(f)
-            def wrapper(self, *args, **kwargs):
+            def sync_wrapper(self, *args: Any, **kwargs: Any) -> Any:
+                """
+                wrapper for sync functions
+                """
                 cache = get_cache(self)
                 key, args, kwargs = bind(self, *args, **kwargs)
                 try:
@@ -288,25 +351,24 @@ class memoized_method:
                     x = f(*args, **kwargs)
                     cache[key] = x
                     return x
+            self.f = sync_wrapper
 
-
-        self.f = wrapper
         self._name = f.__name__
 
     @property
-    def name(self):
+    def name(self) -> str:
         return '__memoization_cache_of_' + self._name
 
     def __call__(self, *args, **kwargs):
         return self.f(*args, **kwargs)
 
-    def __get__(self, obj, owner=None):
+    def __get__(self, obj: Optional['memoized_method'], owner: Optional[Type['memoized_method']] = None) -> Any:
         return self.f.__get__(obj, owner)
 
-    def __set__(self, obj, value):
+    def __set__(self, obj: 'memoized_method', value: Any):
         raise RuntimeError("Cannot monkey-patch a memoized function")
 
-    def __set_name__(self, owner, name):
+    def __set_name__(self, owner: Type['memoized_method'], name: str):
         self._name = name
 
 
@@ -325,22 +387,31 @@ class _Genlet(greenlet):
         self.gr_context = contextvars.copy_context()
 
     @classmethod
-    def from_coro(cls, coro):
+    def from_coro(cls, coro: Coroutine) -> '_Genlet':
         """
         Create a :class:`_Genlet` from a given coroutine, treating it as a
         generator.
+
+        :param coro: The coroutine to wrap.
+        :returns: A _Genlet that wraps the coroutine.
         """
-        f = lambda value: self.consume_coro(coro, value)
+        def f(value: Any) -> Any:
+            return self.consume_coro(coro, value)
         self = cls(f)
         return self
 
-    def consume_coro(self, coro, value):
+    def consume_coro(self, coro: Coroutine, value: Any) -> Any:
         """
         Send ``value`` to ``coro`` then consume the coroutine, passing all its
         yielded actions to the enclosing :class:`_Genlet`. This allows crossing
         blocking calls layers as if they were async calls with `await`.
+
+        :param coro: The coroutine to consume.
+        :param value: The initial value to send.
+        :returns: The final value returned by the coroutine.
+        :raises StopIteration: When the coroutine is exhausted.
         """
-        excep = None
+        excep: Optional[BaseException] = None
         while True:
             try:
                 if excep is None:
@@ -351,11 +422,11 @@ class _Genlet(greenlet):
             except StopIteration as e:
                 return e.value
             else:
-                parent = self.parent
+                parent: Optional[greenlet] = self.parent
                 # Switch back to the consumer that returns the values via
                 # send()
                 try:
-                    value = parent.switch(future)
+                    value = parent.switch(future) if parent else None
                 except BaseException as e:
                     excep = e
                     value = None
@@ -363,17 +434,27 @@ class _Genlet(greenlet):
                     excep = None
 
     @classmethod
-    def get_enclosing(cls):
+    def get_enclosing(cls) -> Optional['_Genlet']:
         """
         Get the immediately enclosing :class:`_Genlet` in the callstack or
         ``None``.
+
+        :returns: The nearest _Genlet instance in the chain, or None if not found.
         """
         g = greenlet.getcurrent()
         while not (isinstance(g, cls) or g is None):
             g = g.parent
         return g
 
-    def _send_throw(self, value, excep):
+    def _send_throw(self, value: Optional['_Genlet'], excep: Optional[BaseException]) -> Any:
+        """
+        helper function to do switch to another genlet or throw exception
+
+        :param value: The value to send to the parent.
+        :param excep: The exception to throw in the parent, or None.
+        :returns: The result returned from the parent's switch.
+        :raises StopIteration: If the parent completes.
+        """
         self.parent = greenlet.getcurrent()
 
         # Switch back to the function yielding values
@@ -387,55 +468,78 @@ class _Genlet(greenlet):
         else:
             raise StopIteration(result)
 
-    def gen_send(self, x):
+    def gen_send(self, x: Optional['_Genlet']) -> Any:
         """
         Similar to generators' ``send`` method.
+
+        :param x: The value to send.
+        :returns: The value received from the parent.
         """
         return self._send_throw(x, None)
 
-    def gen_throw(self, x):
+    def gen_throw(self, x: Optional[BaseException]):
         """
         Similar to generators' ``throw`` method.
+
+        :param x: The exception to throw.
+        :returns: The value received from the parent after handling the exception.
         """
         return self._send_throw(None, x)
 
 
 class _AwaitableGenlet:
     """
-    Wrap a coroutine with a :class:`_Genlet` and wrap that to be awaitable.
+    Wraps a coroutine with a :class:`_Genlet` to allow it to be awaited using
+    the normal 'await' syntax.
+
+    :param coro: The coroutine to wrap.
     """
 
     @classmethod
-    def wrap_coro(cls, coro):
-        async def coro_f():
+    def wrap_coro(cls, coro: Coroutine) -> Coroutine:
+        """
+        Wrap a coroutine inside an _AwaitableGenlet so that it becomes awaitable.
+
+        :param coro: The coroutine to wrap.
+        :returns: An awaitable version of the coroutine.
+        """
+        async def coro_f() -> Any:
             # Make sure every new task will be instrumented since a task cannot
             # yield futures on behalf of another task. If that were to happen,
             # the task B trying to do a nested yield would switch back to task
             # A, asking to yield on its behalf. Since the event loop would be
             # currently handling task B, nothing would handle task A trying to
             # yield on behalf of B, leading to a deadlock.
-            loop = asyncio.get_running_loop()
+            loop: AbstractEventLoop = asyncio.get_running_loop()
             _install_task_factory(loop)
 
             # Create a top-level _AwaitableGenlet that all nested runs will use
             # to yield their futures
-            _coro = cls(coro)
+            _coro: '_AwaitableGenlet' = cls(coro)
 
             return await _coro
 
         return coro_f()
 
-    def __init__(self, coro):
+    def __init__(self, coro: Coroutine):
         self._coro = coro
 
-    def __await__(self):
-        coro = self._coro
-        is_started = inspect.iscoroutine(coro) and coro.cr_running
+    def __await__(self) -> Generator:
+        """
+        Make the _AwaitableGenlet awaitable.
 
-        def genf():
+        :returns: A generator that yields from the wrapped coroutine.
+        """
+        coro: Coroutine = self._coro
+        is_started: bool = inspect.iscoroutine(coro) and coro.cr_running
+
+        def genf() -> Generator:
+            """
+            generator function
+            """
             gen = _Genlet.from_coro(coro)
-            value = None
-            excep = None
+            value: Optional[_Genlet] = None
+            excep: Optional[BaseException] = None
 
             # The coroutine is already started, so we need to dispatch the
             # value from the upcoming send() to the gen without running
@@ -468,25 +572,35 @@ class _AwaitableGenlet:
         gen = genf()
         if is_started:
             # Start the generator so it waits at the first yield point
-            gen.gen_send(None)
+            cast(_Genlet, gen).gen_send(None)
 
         return gen
 
 
-def _allow_nested_run(coro):
+def _allow_nested_run(coro: Coroutine) -> Coroutine:
+    """
+    If the current callstack does not have an enclosing _Genlet, wrap the coroutine
+    using _AwaitableGenlet; otherwise, return the coroutine unchanged.
+
+    :param coro: The coroutine to potentially wrap.
+    :returns: The original coroutine or a wrapped awaitable coroutine.
+    """
     if _Genlet.get_enclosing() is None:
         return _AwaitableGenlet.wrap_coro(coro)
     else:
         return coro
 
 
-def allow_nested_run(coro):
+def allow_nested_run(coro: Coroutine) -> Coroutine:
     """
     Wrap the coroutine ``coro`` such that nested calls to :func:`run` will be
-    allowed.
+    allowed. This is useful when a coroutine needs to yield control to another layer.
 
     .. warning:: The coroutine needs to be consumed in the same OS thread it
         was created in.
+
+    :param coro: The coroutine to wrap.
+    :returns: A possibly wrapped coroutine that allows nested execution.
     """
     return _allow_nested_run(coro)
 
@@ -503,7 +617,13 @@ _CORO_THREAD_EXECUTOR = ThreadPoolExecutor(
 )
 
 
-def _check_executor_alive(executor):
+def _check_executor_alive(executor: ThreadPoolExecutor) -> bool:
+    """
+    Check if the given ThreadPoolExecutor is still alive by submitting a no-op job.
+
+    :param executor: The ThreadPoolExecutor to check.
+    :returns: True if the executor accepts new jobs; False otherwise.
+    """
     try:
         executor.submit(lambda: None)
     except RuntimeError:
@@ -513,29 +633,37 @@ def _check_executor_alive(executor):
 
 
 _PATCHED_LOOP_LOCK = threading.Lock()
-_PATCHED_LOOP = WeakSet()
-def _install_task_factory(loop):
+_PATCHED_LOOP: WeakSet = WeakSet()
+
+
+def _install_task_factory(loop: AbstractEventLoop):
     """
     Install a task factory on the given event ``loop`` so that top-level
     coroutines are wrapped using :func:`allow_nested_run`. This ensures that
     the nested :func:`run` infrastructure will be available.
+
+    :param loop: The asyncio event loop on which to install the task factory.
     """
-    def install(loop):
+    def install(loop: AbstractEventLoop) -> None:
+        """
+        install the task factory on the event loop
+        """
         if sys.version_info >= (3, 11):
-            def default_factory(loop, coro, context=None):
+            def default_factory(loop: AbstractEventLoop, coro: Coroutine, context: Optional[Context] = None) -> Optional[Task]:
                 return asyncio.Task(coro, loop=loop, context=context)
         else:
-            def default_factory(loop, coro, context=None):
+            def default_factory(loop: AbstractEventLoop, coro: Coroutine, context: Optional[Context] = None) -> Optional[Task]:
                 return asyncio.Task(coro, loop=loop)
 
         make_task = loop.get_task_factory() or default_factory
-        def factory(loop, coro, context=None):
+
+        def factory(loop: AbstractEventLoop, coro: Coroutine, context: Optional[Context] = None) -> Optional[Task]:
             # Make sure each Task will be able to yield on behalf of its nested
             # await beneath blocking layers
             coro = _AwaitableGenlet.wrap_coro(coro)
-            return make_task(loop, coro, context=context)
+            return cast(Callable, make_task)(loop, coro, context=context)
 
-        loop.set_task_factory(factory)
+        loop.set_task_factory(cast(Callable, factory))
 
     with _PATCHED_LOOP_LOCK:
         if loop in _PATCHED_LOOP:
@@ -545,13 +673,16 @@ def _install_task_factory(loop):
             _PATCHED_LOOP.add(loop)
 
 
-def _set_current_context(ctx):
+def _set_current_context(ctx: Optional[Context]) -> None:
     """
     Get all the variable from the passed ``ctx`` and set them in the current
     context.
+
+    :param ctx: A Context object containing variable values to set.
     """
-    for var, val in ctx.items():
-        var.set(val)
+    if ctx:
+        for var, val in ctx.items():
+            var.set(val)
 
 
 class _CoroRunner(abc.ABC):
@@ -564,10 +695,22 @@ class _CoroRunner(abc.ABC):
     single event loop.
     """
     @abc.abstractmethod
-    def _run(self, coro):
+    def _run(self, coro: Coroutine) -> Any:
+        """
+        Execute the given coroutine using the runner's mechanism.
+
+        :param coro: The coroutine to run.
+        """
         pass
 
-    def run(self, coro):
+    def run(self, coro: Coroutine) -> Any:
+        """
+        Run the provided coroutine using the implemented runner. Raises an
+        assertion error if the coroutine is already running.
+
+        :param coro: The coroutine to run.
+        :returns: The result of the coroutine.
+        """
         # Ensure we have a fresh coroutine. inspect.getcoroutinestate() does not
         # work on all objects that asyncio creates on some version of Python, such
         # as iterable_coroutine
@@ -588,26 +731,38 @@ class _ThreadCoroRunner(_CoroRunner):
 
     Critically, this allows running multiple coroutines out of the same thread,
     which will be reserved until the runner ``__exit__`` method is called.
+
+    :param future: A Future representing the thread running the coroutine loop.
+    :param jobq: A SimpleQueue for scheduling coroutine jobs.
+    :param resq: A SimpleQueue to collect results from executed coroutines.
     """
-    def __init__(self, future, jobq, resq):
+    def __init__(self, future: 'Future', jobq: 'SimpleQueue[Optional[Tuple[Context, Coroutine]]]',
+                 resq: 'SimpleQueue[Tuple[Context, Optional[BaseException], Any]]'):
         self._future = future
         self._jobq = jobq
         self._resq = resq
 
     @staticmethod
-    def _thread_f(jobq, resq):
-        def handle_jobs(runner):
+    def _thread_f(jobq: 'SimpleQueue[Optional[Tuple[Context, Coroutine]]]',
+                  resq: 'SimpleQueue[Tuple[Context, Optional[BaseException], Any]]') -> None:
+        """
+        Thread function that continuously processes scheduled coroutine jobs.
+
+        :param jobq: Queue of jobs.
+        :param resq: Queue to store results from the jobs.
+        """
+        def handle_jobs(runner: _LoopCoroRunner) -> None:
             while True:
-                job = jobq.get()
+                job: Optional[Tuple[Context, Coroutine]] = jobq.get()
                 if job is None:
                     return
                 else:
                     ctx, coro = job
                     try:
-                        value = ctx.run(runner.run, coro)
+                        value: Any = ctx.run(runner.run, coro)
                     except BaseException as e:
                         value = None
-                        excep = e
+                        excep: Optional[BaseException] = e
                     else:
                         excep = None
 
@@ -617,12 +772,19 @@ class _ThreadCoroRunner(_CoroRunner):
             handle_jobs(runner)
 
     @classmethod
-    def from_executor(cls, executor):
-        jobq = queue.SimpleQueue()
-        resq = queue.SimpleQueue()
+    def from_executor(cls, executor: ThreadPoolExecutor) -> '_ThreadCoroRunner':
+        """
+        Create a _ThreadCoroRunner by submitting the thread function to an executor.
+
+        :param executor: A ThreadPoolExecutor to run the coroutine loop.
+        :returns: An instance of _ThreadCoroRunner.
+        :raises RuntimeError: If the executor is not alive.
+        """
+        jobq: SimpleQueue[Optional[Tuple[Context, Coroutine]]] = queue.SimpleQueue()
+        resq: SimpleQueue = queue.SimpleQueue()
 
         try:
-            future = executor.submit(cls._thread_f, jobq, resq)
+            future: Future = executor.submit(cls._thread_f, jobq, resq)
         except RuntimeError as e:
             if _check_executor_alive(executor):
                 raise e
@@ -635,7 +797,14 @@ class _ThreadCoroRunner(_CoroRunner):
             future=future,
         )
 
-    def _run(self, coro):
+    def _run(self, coro: Coroutine) -> Any:
+        """
+        Schedule and run a coroutine in the separate thread, waiting for its result.
+
+        :param coro: The coroutine to execute.
+        :returns: The result from running the coroutine.
+        :raises Exception: Propagates any exception raised by the coroutine.
+        """
         ctx = contextvars.copy_context()
         self._jobq.put((ctx, coro))
         ctx, excep, value = self._resq.get()
@@ -659,20 +828,29 @@ class _LoopCoroRunner(_CoroRunner):
     The passed event loop is assumed to not be running. If ``None`` is passed,
     a new event loop will be created in ``__enter__`` and closed in
     ``__exit__``.
-    """
-    def __init__(self, loop):
-        self.loop = loop
-        self._owned = False
 
-    def _run(self, coro):
+    :param loop: An event loop to use; if None, a new one is created.
+    """
+    def __init__(self, loop: Optional[AbstractEventLoop]):
+        self.loop = loop
+        self._owned: bool = False
+
+    def _run(self, coro: Coroutine) -> Any:
+        """
+        Run the given coroutine to completion on the event loop and return its result.
+
+        :param coro: The coroutine to run.
+        :returns: The result of the coroutine.
+        """
         loop = self.loop
 
         # Back-propagate the contextvars that could have been modified by the
         # coroutine. This could be handled by asyncio.Runner().run(...,
         # context=...) or loop.create_task(..., context=...) but these APIs are
         # only available since Python 3.11
-        ctx = None
-        async def capture_ctx():
+        ctx: Optional[Context] = None
+
+        async def capture_ctx() -> Any:
             nonlocal ctx
             try:
                 return await _allow_nested_run(coro)
@@ -680,12 +858,13 @@ class _LoopCoroRunner(_CoroRunner):
                 ctx = contextvars.copy_context()
 
         try:
-            return loop.run_until_complete(capture_ctx())
+            if loop:
+                return loop.run_until_complete(capture_ctx())
         finally:
             _set_current_context(ctx)
 
-    def __enter__(self):
-        loop = self.loop
+    def __enter__(self) -> '_LoopCoroRunner':
+        loop: Optional[AbstractEventLoop] = self.loop
         if loop is None:
             owned = True
             loop = asyncio.new_event_loop()
@@ -708,16 +887,33 @@ class _GenletCoroRunner(_CoroRunner):
     """
     Run a coroutine assuming one of the parent coroutines was wrapped with
     :func:`allow_nested_run`.
+
+    :param g: The enclosing _Genlet instance.
     """
-    def __init__(self, g):
+    def __init__(self, g: _Genlet):
         self._g = g
 
-    def _run(self, coro):
+    def _run(self, coro: Coroutine) -> Any:
+        """
+        Execute the coroutine by delegating to the enclosing _Genlet's consume_coro method.
+
+        :param coro: The coroutine to run.
+        :returns: The result of the coroutine.
+        """
         return self._g.consume_coro(coro, None)
 
 
-def _get_runner():
-    executor = _CORO_THREAD_EXECUTOR
+def _get_runner() -> Union[_GenletCoroRunner,
+                           _LoopCoroRunner,
+                           _ThreadCoroRunner]:
+    """
+    Determine the appropriate coroutine runner based on the current context.
+    Returns a _GenletCoroRunner if an enclosing _Genlet is present, a _LoopCoroRunner
+    if an event loop exists (or can be created), or a _ThreadCoroRunner if an event loop is running.
+
+    :returns: A coroutine runner appropriate for the current execution context.
+    """
+    executor: ThreadPoolExecutor = _CORO_THREAD_EXECUTOR
     g = _Genlet.get_enclosing()
     try:
         loop = asyncio.get_running_loop()
@@ -748,7 +944,7 @@ def _get_runner():
         return _ThreadCoroRunner.from_executor(executor)
 
 
-def run(coro):
+def run(coro: Coroutine) -> Any:
     """
     Similar to :func:`asyncio.run` but can be called while an event loop is
     running if a coroutine higher in the callstack has been wrapped using
@@ -759,13 +955,16 @@ def run(coro):
     be reflected in the context of the caller. This allows context variable
     updates to cross an arbitrary number of run layers, as if all those layers
     were just part of the same coroutine.
+
+    :param coro: The coroutine to execute.
+    :returns: The result of the coroutine.
     """
     runner = _get_runner()
     with runner as runner:
         return runner.run(coro)
 
 
-def asyncf(f):
+def asyncf(f: Callable):
     """
     Decorator used to turn a coroutine into a blocking function, with an
     optional asynchronous API.
@@ -787,17 +986,20 @@ def asyncf(f):
     This allows the same implementation to be both used as blocking for ease of
     use and backward compatibility, or exposed as a corountine for callers that
     can deal with awaitables.
+
+    :param f: The asynchronous function to decorate.
+    :returns: A callable that runs f synchronously, with an asynchronous version available as .asyn.
     """
     @functools.wraps(f)
-    def blocking(*args, **kwargs):
+    def blocking(*args, **kwargs) -> Any:
         # Since run() needs a corountine, make sure we provide one
-        async def wrapper():
+        async def wrapper() -> Generator:
             x = f(*args, **kwargs)
             # Async generators have to be consumed and accumulated in a list
             # before crossing a blocking boundary.
             if inspect.isasyncgen(x):
 
-                def genf():
+                def genf() -> Generator:
                     asyncgen = x.__aiter__()
                     while True:
                         try:
@@ -817,18 +1019,22 @@ def asyncf(f):
 
 
 class _AsyncPolymorphicCMState:
-    def __init__(self):
-        self.nesting = 0
-        self.runner = None
+    def __init__(self) -> None:
+        self.nesting: int = 0
+        self.runner: Optional[Union[_GenletCoroRunner,
+                                    _LoopCoroRunner,
+                                    _ThreadCoroRunner]] = None
 
-    def _update_nesting(self, n):
+    def _update_nesting(self, n: int) -> bool:
         x = self.nesting
         assert x >= 0
         x = x + n
         self.nesting = x
         return bool(x)
 
-    def _get_runner(self):
+    def _get_runner(self) -> Optional[Union[_GenletCoroRunner,
+                                      _LoopCoroRunner,
+                                      _ThreadCoroRunner]]:
         runner = self.runner
         if runner is None:
             assert not self.nesting
@@ -837,8 +1043,8 @@ class _AsyncPolymorphicCMState:
         self.runner = runner
         return runner
 
-    def _cleanup_runner(self, force=False):
-        def cleanup():
+    def _cleanup_runner(self, force: bool = False) -> None:
+        def cleanup() -> None:
             self.runner = None
             if runner is not None:
                 runner.__exit__(None, None, None)
@@ -856,13 +1062,21 @@ class _AsyncPolymorphicCM:
     """
     Wrap an async context manager such that it exposes a synchronous API as
     well for backward compatibility.
+
+    :param async_cm: The asynchronous context manager to wrap.
     """
 
-    def __init__(self, async_cm):
+    def __init__(self, async_cm: AsyncContextManager):
         self.cm = async_cm
-        self._state = threading.local()
+        self._state: local = threading.local()
 
     def _get_state(self):
+        """
+        Retrieve or initialize the thread-local state for this context manager.
+
+        :returns: The state object.
+        :rtype: _AsyncPolymorphicCMState
+        """
         try:
             return self._state.x
         except AttributeError:
@@ -870,7 +1084,10 @@ class _AsyncPolymorphicCM:
             self._state.x = state
             return state
 
-    def _delete_state(self):
+    def _delete_state(self) -> None:
+        """
+        Delete the thread-local state.
+        """
         try:
             del self._state.x
         except AttributeError:
@@ -883,33 +1100,39 @@ class _AsyncPolymorphicCM:
         return self.cm.__aexit__(*args, **kwargs)
 
     @staticmethod
-    def _exit(state):
+    def _exit(state: _AsyncPolymorphicCMState) -> None:
         state._update_nesting(-1)
         state._cleanup_runner()
 
-    def __enter__(self, *args, **kwargs):
-        state = self._get_state()
-        runner = state._get_runner()
+    def __enter__(self, *args, **kwargs) -> Any:
+        state: _AsyncPolymorphicCMState = self._get_state()
+        runner: Optional[Union[_GenletCoroRunner,
+                               _LoopCoroRunner,
+                               _ThreadCoroRunner]] = state._get_runner()
 
         # Increase the nesting count _before_ we start running the
         # coroutine, in case it is a recursive context manager
         state._update_nesting(1)
 
         try:
-            coro = self.cm.__aenter__(*args, **kwargs)
-            return runner.run(coro)
+            coro: Coroutine = self.cm.__aenter__(*args, **kwargs)
+            if runner:
+                return runner.run(coro)
         except BaseException:
             self._exit(state)
             raise
 
-    def __exit__(self, *args, **kwargs):
-        coro = self.cm.__aexit__(*args, **kwargs)
+    def __exit__(self, *args, **kwargs) -> Any:
+        coro: Coroutine = self.cm.__aexit__(*args, **kwargs)
 
-        state = self._get_state()
-        runner = state._get_runner()
+        state: _AsyncPolymorphicCMState = self._get_state()
+        runner: Optional[Union[_GenletCoroRunner,
+                               _LoopCoroRunner,
+                               _ThreadCoroRunner]] = state._get_runner()
 
         try:
-            return runner.run(coro)
+            if runner:
+                return runner.run(coro)
         finally:
             self._exit(state)
 
@@ -917,16 +1140,22 @@ class _AsyncPolymorphicCM:
         self._get_state()._cleanup_runner(force=True)
 
 
-def asynccontextmanager(f):
+T = TypeVar('T')
+
+
+def asynccontextmanager(f: Callable[..., AsyncGenerator[T, None]]) -> Callable[..., _AsyncPolymorphicCM]:
     """
     Same as :func:`contextlib.asynccontextmanager` except that it can also be
     used with a regular ``with`` statement for backward compatibility.
-    """
-    f = contextlib.asynccontextmanager(f)
 
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        cm = f(*args, **kwargs)
+    :param f: A callable that returns an asynchronous generator.
+    :returns: A context manager supporting both synchronous and asynchronous usage.
+    """
+    f_int = contextlib.asynccontextmanager(f)
+
+    @functools.wraps(f_int)
+    def wrapper(*args: Any, **kwargs: Any) -> _AsyncPolymorphicCM:
+        cm = f_int(*args, **kwargs)
         return _AsyncPolymorphicCM(cm)
 
     return wrapper
@@ -935,46 +1164,53 @@ def asynccontextmanager(f):
 class ConcurrentAccessBase(abc.ABC):
     """
     Abstract Base Class for resources tracked by :func:`concurrently`.
+    Subclasses must implement the method to determine if two resources overlap.
     """
     @abc.abstractmethod
-    def overlap_with(self, other):
+    def overlap_with(self, other: 'ConcurrentAccessBase') -> bool:
         """
         Return ``True`` if the resource overlaps with the given one.
 
         :param other: Resources that should not overlap with ``self``.
-        :type other: devlib.utils.asym.ConcurrentAccessBase
+        :returns: True if the two resources overlap; False otherwise.
 
         .. note:: It is guaranteed that ``other`` will be a subclass of our
             class.
         """
+
 
 class PathAccess(ConcurrentAccessBase):
     """
     Concurrent resource representing a file access.
 
     :param namespace: Identifier of the namespace of the path. One of "target" or "host".
-    :type namespace: str
 
     :param path: Normalized path to the file.
-    :type path: str
 
     :param mode: Opening mode of the file. Can be ``"r"`` for read and ``"w"``
         for writing.
-    :type mode: str
     """
-    def __init__(self, namespace, path, mode):
+    def __init__(self, namespace: str, path: str, mode: str):
         assert namespace in ('host', 'target')
         self.namespace = namespace
         assert mode in ('r', 'w')
         self.mode = mode
         self.path = os.path.abspath(path) if namespace == 'host' else os.path.normpath(path)
 
-    def overlap_with(self, other):
+    def overlap_with(self, other: ConcurrentAccessBase) -> bool:
+        """
+        Check if this path access overlaps with another access, considering
+        namespace, mode, and filesystem hierarchy.
+
+        :param other: Another resource access instance.
+        :returns: True if the two paths overlap (and one of the accesses is for writing), else False.
+        """
+        other_internal = cast('PathAccess', other)
         path1 = pathlib.Path(self.path).resolve()
-        path2 = pathlib.Path(other.path).resolve()
+        path2 = pathlib.Path(other_internal.path).resolve()
         return (
-            self.namespace == other.namespace and
-            'w' in (self.mode, other.mode) and
+            self.namespace == other_internal.namespace and
+            'w' in (self.mode, other_internal.mode) and
             (
                 path1 == path2 or
                 path1 in path2.parents or
@@ -983,6 +1219,11 @@ class PathAccess(ConcurrentAccessBase):
         )
 
     def __str__(self):
+        """
+        Return a string representation of the PathAccess, including the path and mode.
+
+        :returns: A string describing the path access.
+        """
         mode = {
             'r': 'read',
             'w': 'write',
