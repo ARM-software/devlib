@@ -1,5 +1,5 @@
 #
-#    Copyright 2024 ARM Limited
+#    Copyright 2024-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@ $ python -m pytest --log-cli-level DEBUG test_target.py
 
 import logging
 import os
+from typing import Optional
+
 import pytest
 
 from devlib import AndroidTarget, ChromeOsTarget, LinuxTarget, LocalLinuxTarget
@@ -36,7 +38,7 @@ from devlib.utils.misc import load_struct_from_yaml
 logger = logging.getLogger('test_target')
 
 
-def get_class_object(name):
+def get_class_object(name: str) -> Optional[object]:
     """
     Get associated class object from string formatted class name
 
