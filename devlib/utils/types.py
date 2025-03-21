@@ -1,4 +1,4 @@
-#    Copyright 2014-2018 ARM Limited
+#    Copyright 2014-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,9 +30,9 @@ import re
 import sys
 from functools import total_ordering
 
-from past.builtins import basestring
 
 from devlib.utils.misc import isiterable, to_identifier, ranges_to_list, list_to_mask
+from typing import List, Union
 
 
 def identifier(text):
@@ -49,7 +49,7 @@ def boolean(value):
 
     """
     false_strings = ['', '0', 'n', 'no', 'off']
-    if isinstance(value, basestring):
+    if isinstance(value, str):
         value = value.lower()
         if value in false_strings or 'false'.startswith(value):
             return False
@@ -58,7 +58,7 @@ def boolean(value):
 
 def integer(value):
     """Handles conversions for string respresentations of binary, octal and hex."""
-    if isinstance(value, basestring):
+    if isinstance(value, str):
         return int(value, 0)
     else:
         return int(value)
@@ -74,7 +74,7 @@ def numeric(value):
     if isinstance(value, int):
         return value
 
-    if isinstance(value, basestring):
+    if isinstance(value, str):
         value = value.strip()
         if value.endswith('%'):
             try:
@@ -102,17 +102,17 @@ class caseless_string(str):
     """
 
     def __eq__(self, other):
-        if isinstance(other, basestring):
+        if isinstance(other, str):
             other = other.lower()
         return self.lower() == other
 
     def __ne__(self, other):
-        if isinstance(other, basestring):
+        if isinstance(other, str):
             other = other.lower()
         return self.lower() != other
 
     def __lt__(self, other):
-        if isinstance(other, basestring):
+        if isinstance(other, str):
             other = other.lower()
         return self.lower() < other
 
@@ -123,11 +123,14 @@ class caseless_string(str):
         return caseless_string(super(caseless_string, self).format(*args, **kwargs))
 
 
-def bitmask(value):
-    if isinstance(value, basestring):
+def bitmask(value: Union[int, List[int], str]) -> int:
+    if isinstance(value, str):
         value = ranges_to_list(value)
     if isiterable(value):
-        value = list_to_mask(value)
+        if isinstance(value, list):
+            value = list_to_mask(value)
+        else:
+            raise TypeError("Expected a list of integers")
     if not isinstance(value, int):
         raise ValueError(value)
     return value

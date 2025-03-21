@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,16 +15,21 @@
 
 import os
 import sys
-from collections import namedtuple
 from subprocess import Popen, PIPE
+from typing import NamedTuple, Optional
 
 
-VersionTuple = namedtuple('Version', ['major', 'minor', 'revision', 'dev'])
+class Version(NamedTuple):
+    major: int
+    minor: int
+    revision: int
+    dev: str
 
-version = VersionTuple(1, 4, 0, 'dev3')
+
+version = Version(1, 4, 0, 'dev3')
 
 
-def get_devlib_version():
+def get_devlib_version() -> str:
     version_string = '{}.{}.{}'.format(
         version.major, version.minor, version.revision)
     if version.dev:
@@ -32,7 +37,7 @@ def get_devlib_version():
     return version_string
 
 
-def get_commit():
+def get_commit() -> Optional[str]:
     try:
         p = Popen(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__),
                   stdout=PIPE, stderr=PIPE)

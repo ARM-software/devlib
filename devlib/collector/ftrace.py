@@ -1,4 +1,4 @@
-#    Copyright 2015-2018 ARM Limited
+#    Copyright 2015-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,12 +30,19 @@ from devlib.exception import TargetStableError, HostError
 from devlib.utils.misc import check_output, which, memoized
 from devlib.utils.asyn import asyncf
 
+from devlib.module.cpufreq import CpufreqModule
+from devlib.module.cpuidle import Cpuidle
+from typing import (cast, List, Pattern, TYPE_CHECKING, Optional,
+                    Dict, Union, Match)
+from devlib.utils.annotation_helpers import BackgroundCommand
+if TYPE_CHECKING:
+    from devlib.target import Target
 
-TRACE_MARKER_START = 'TRACE_MARKER_START'
-TRACE_MARKER_STOP = 'TRACE_MARKER_STOP'
-OUTPUT_TRACE_FILE = 'trace.dat'
-OUTPUT_PROFILE_FILE = 'trace_stat.dat'
-DEFAULT_EVENTS = [
+TRACE_MARKER_START: str = 'TRACE_MARKER_START'
+TRACE_MARKER_STOP: str = 'TRACE_MARKER_STOP'
+OUTPUT_TRACE_FILE: str = 'trace.dat'
+OUTPUT_PROFILE_FILE: str = 'trace_stat.dat'
+DEFAULT_EVENTS: List[str] = [
     'cpu_frequency',
     'cpu_idle',
     'sched_migrate_task',
@@ -46,33 +53,71 @@ DEFAULT_EVENTS = [
     'sched_wakeup',
     'sched_wakeup_new',
 ]
-TIMEOUT = 180
+TIMEOUT: int = 180
 
 # Regexps for parsing of function profiling data
-CPU_RE = re.compile(r'  Function \(CPU([0-9]+)\)')
-STATS_RE = re.compile(r'([^ ]*) +([0-9]+) +([0-9.]+) us +([0-9.]+) us +([0-9.]+) us')
+CPU_RE: Pattern[str] = re.compile(r'  Function \(CPU([0-9]+)\)')
+STATS_RE: Pattern[str] = re.compile(r'([^ ]*) +([0-9]+) +([0-9.]+) us +([0-9.]+) us +([0-9.]+) us')
+
 
 class FtraceCollector(CollectorBase):
+    """
+    Collector using ftrace to trace kernel events and functions.
 
+    :param target: The devlib Target (must be rooted).
+    :type target: Target
+    :param events: A list of events to trace (defaults to `DEFAULT_EVENTS`).
+    :type events: List(str)
+    :param functions: A list of functions to trace, if function tracing is used.
+    :type functions: List(str)
+    :param tracer: The tracer to use (e.g., 'function_graph'), or ``None``.
+    :type tracer: str
+    :param trace_children_functions: If ``True``, trace child functions as well.
+    :type trace_children_functions: bool
+    :param buffer_size: The size of the trace buffer in KB.
+    :type buffer_size: int
+    :param top_buffer_size: The top-level buffer size in KB, if different.
+    :type top_buffer_size: int
+    :param buffer_size_step: The step size for increasing the buffer.
+    :type buffer_size_step: int
+    :param tracing_path: The path to the tracefs mount point, if not auto-detected.
+    :type tracing_path: str
+    :param automark: If ``True``, automatically mark start and stop in the trace.
+    :type automark: bool
+    :param autoreport: If ``True``, generate a textual trace report automatically.
+    :type autoreport: bool
+    :param autoview: If ``True``, open KernelShark for a graphical view of the trace.
+    :type autoview: bool
+    :param no_install: If ``True``, assume trace-cmd is already installed on target.
+    :type no_install: bool
+    :param strict: If ``True``, raise errors if requested events/functions are not available.
+    :type strict: bool
+    :param report_on_target: If ``True``, generate the trace report on the target side.
+    :type report_on_target: bool
+    :param trace_clock: The clock source for the trace.
+    :type trace_clock: bool
+    :param saved_cmdlines_nr: The number of cmdlines to save in the trace buffer.
+    :type saved_cmdlines_nr: int
+    """
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-    def __init__(self, target,
-                 events=None,
-                 functions=None,
-                 tracer=None,
-                 trace_children_functions=False,
-                 buffer_size=None,
-                 top_buffer_size=None,
-                 buffer_size_step=1000,
-                 tracing_path=None,
-                 automark=True,
-                 autoreport=True,
-                 autoview=False,
-                 no_install=False,
-                 strict=False,
-                 report_on_target=False,
-                 trace_clock='local',
-                 saved_cmdlines_nr=4096,
-                 mode='write-to-memory',
+    def __init__(self, target: 'Target',
+                 events: Optional[List[str]] = None,
+                 functions: Optional[List[str]] = None,
+                 tracer: Optional[str] = None,
+                 trace_children_functions: bool = False,
+                 buffer_size: Optional[int] = None,
+                 top_buffer_size: Optional[int] = None,
+                 buffer_size_step: int = 1000,
+                 tracing_path: Optional[str] = None,
+                 automark: bool = True,
+                 autoreport: bool = True,
+                 autoview: bool = False,
+                 no_install: bool = False,
+                 strict: bool = False,
+                 report_on_target: bool = False,
+                 trace_clock: str = 'local',
+                 saved_cmdlines_nr: int = 4096,
+                 mode: str = 'write-to-memory',
                  ):
         super(FtraceCollector, self).__init__(target)
         self.events = events if events is not None else DEFAULT_EVENTS
@@ -81,40 +126,40 @@ class FtraceCollector(CollectorBase):
         self.trace_children_functions = trace_children_functions
         self.buffer_size = buffer_size
         self.top_buffer_size = top_buffer_size
-        self.tracing_path = self._resolve_tracing_path(target, tracing_path)
+        self.tracing_path: str = self._resolve_tracing_path(target, tracing_path)
         self.automark = automark
         self.autoreport = autoreport
         self.autoview = autoview
         self.strict = strict
         self.report_on_target = report_on_target
-        self.target_output_file = target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE)
-        text_file_name = target.path.splitext(OUTPUT_TRACE_FILE)[0] + '.txt'
-        self.target_text_file = target.path.join(self.target.working_directory, text_file_name)
-        self.output_path = None
-        self.target_binary = None
-        self.host_binary = None
-        self.start_time = None
-        self.stop_time = None
-        self.function_string = None
+        self.target_output_file: str = target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE) if target.path else ''
+        text_file_name: str = target.path.splitext(OUTPUT_TRACE_FILE)[0] + '.txt' if target.path else ''
+        self.target_text_file: str = target.path.join(self.target.working_directory, text_file_name) if target.path else ''
+        self.output_path: Optional[str] = None
+        self.target_binary: Optional[str] = None
+        self.host_binary: Optional[str] = None
+        self.start_time: Optional[float] = None
+        self.stop_time: Optional[float] = None
+        self.function_string: Optional[str] = None
         self.trace_clock = trace_clock
         self.saved_cmdlines_nr = saved_cmdlines_nr
-        self._reset_needed = True
+        self._reset_needed: bool = True
         self.mode = mode
-        self._bg_cmd = None
+        self._bg_cmd: Optional[BackgroundCommand] = None
 
         # pylint: disable=bad-whitespace
         # Setup tracing paths
-        self.available_events_file    = self.target.path.join(self.tracing_path, 'available_events')
-        self.available_functions_file = self.target.path.join(self.tracing_path, 'available_filter_functions')
-        self.current_tracer_file      = self.target.path.join(self.tracing_path, 'current_tracer')
-        self.function_profile_file    = self.target.path.join(self.tracing_path, 'function_profile_enabled')
-        self.marker_file              = self.target.path.join(self.tracing_path, 'trace_marker')
-        self.ftrace_filter_file       = self.target.path.join(self.tracing_path, 'set_ftrace_filter')
-        self.available_tracers_file   = self.target.path.join(self.tracing_path, 'available_tracers')
-        self.kprobe_events_file       = self.target.path.join(self.tracing_path, 'kprobe_events')
+        self.available_events_file: str    = self.target.path.join(self.tracing_path, 'available_events') if self.target.path else ''
+        self.available_functions_file: str = self.target.path.join(self.tracing_path, 'available_filter_functions') if self.target.path else ''
+        self.current_tracer_file: str      = self.target.path.join(self.tracing_path, 'current_tracer') if self.target.path else ''
+        self.function_profile_file: str    = self.target.path.join(self.tracing_path, 'function_profile_enabled') if self.target.path else ''
+        self.marker_file: str              = self.target.path.join(self.tracing_path, 'trace_marker') if self.target.path else ''
+        self.ftrace_filter_file: str       = self.target.path.join(self.tracing_path, 'set_ftrace_filter') if self.target.path else ''
+        self.available_tracers_file: str   = self.target.path.join(self.tracing_path, 'available_tracers') if self.target.path else ''
+        self.kprobe_events_file: str       = self.target.path.join(self.tracing_path, 'kprobe_events') if self.target.path else ''
 
         self.host_binary = which('trace-cmd')
-        self.kernelshark = which('kernelshark')
+        self.kernelshark: Optional[str] = which('kernelshark')
 
         if not self.target.is_rooted:
             raise TargetStableError('trace-cmd instrument cannot be used on an unrooted device.')
@@ -123,7 +168,7 @@ class FtraceCollector(CollectorBase):
         if self.autoview and self.kernelshark is None:
             raise HostError('kernelshark binary must be installed on the host if autoview=True.')
         if not no_install:
-            host_file = os.path.join(PACKAGE_BIN_DIRECTORY, self.target.abi, 'trace-cmd')
+            host_file = os.path.join(PACKAGE_BIN_DIRECTORY, self.target.abi or '', 'trace-cmd')
             self.target_binary = self.target.install(host_file)
         else:
             if not self.target.is_installed('trace-cmd'):
@@ -131,26 +176,32 @@ class FtraceCollector(CollectorBase):
             self.target_binary = 'trace-cmd'
 
         # Validate required events to be traced
-        def event_to_regex(event):
+        def event_to_regex(event: str) -> Pattern[str]:
+            """
+            to use for finding events to be traced
+            """
             if not event.startswith('*'):
                 event = '*' + event
 
             return re.compile(event.replace('*', '.*'))
 
-        def event_is_in_list(event, events):
+        def event_is_in_list(event: str, events: List[str]) -> bool:
+            """
+            true if event is in the list of events
+            """
             return any(
                 event_to_regex(event).match(_event)
                 for _event in events
             )
 
-        available_events = self.available_events
-        unavailable_events = [
+        available_events: List[str] = self.available_events
+        unavailable_events: List[str] = [
             event
             for event in self.events
             if not event_is_in_list(event, available_events)
         ]
         if unavailable_events:
-            message = 'Events not available for tracing: {}'.format(
+            message: str = 'Events not available for tracing: {}'.format(
                 ', '.join(unavailable_events)
             )
             if self.strict:
@@ -158,7 +209,7 @@ class FtraceCollector(CollectorBase):
             else:
                 self.target.logger.warning(message)
 
-        selected_events = sorted(set(self.events) - set(unavailable_events))
+        selected_events: List[str] = sorted(set(self.events) - set(unavailable_events))
 
         if self.tracer and self.tracer not in self.available_tracers:
             raise TargetStableError('Unsupported tracer "{}". Available tracers: {}'.format(
@@ -167,7 +218,7 @@ class FtraceCollector(CollectorBase):
         # Check for function tracing support
         if self.functions:
             # Validate required functions to be traced
-            selected_functions = []
+            selected_functions: List[str] = []
             for function in self.functions:
                 if function not in self.available_functions:
                     message = 'Function [{}] not available for tracing/profiling'.format(function)
@@ -180,7 +231,7 @@ class FtraceCollector(CollectorBase):
             # Function profiling
             if self.tracer is None:
                 if not self.target.file_exists(self.function_profile_file):
-                    raise TargetStableError('Function profiling not supported. '\
+                    raise TargetStableError('Function profiling not supported. '
                                             'A kernel build with CONFIG_FUNCTION_PROFILER enable is required')
                 self.function_string = _build_trace_functions(selected_functions)
                 # If function profiling is enabled we always need at least one event.
@@ -205,14 +256,20 @@ class FtraceCollector(CollectorBase):
         return _build_trace_events(self._selected_events)
 
     @classmethod
-    def _resolve_tracing_path(cls, target, path):
+    def _resolve_tracing_path(cls, target: 'Target', path: Optional[str]) -> str:
+        """
+        Find path for tracefs
+        """
         if path is None:
             return cls.find_tracing_path(target)
         else:
             return path
 
     @classmethod
-    def find_tracing_path(cls, target):
+    def find_tracing_path(cls, target: 'Target') -> str:
+        """
+        get tracefs path from mount point
+        """
         fs_list = [
             fs.mount_point
             for fs in target.list_file_systems()
@@ -226,14 +283,14 @@ class FtraceCollector(CollectorBase):
 
     @property
     @memoized
-    def available_tracers(self):
+    def available_tracers(self) -> List[str]:
         """
         List of ftrace tracers supported by the target's kernel.
         """
         return self.target.read_value(self.available_tracers_file).split(' ')
 
     @property
-    def available_events(self):
+    def available_events(self) -> List[str]:
         """
         List of ftrace events supported by the target's kernel.
         """
@@ -241,16 +298,16 @@ class FtraceCollector(CollectorBase):
 
     @property
     @memoized
-    def available_functions(self):
+    def available_functions(self) -> List[str]:
         """
         List of functions whose tracing/profiling is supported by the target's kernel.
         """
         return self.target.read_value(self.available_functions_file).splitlines()
 
-    def reset(self):
+    def reset(self) -> None:
         # Save kprobe events
         try:
-            kprobe_events = self.target.read_value(self.kprobe_events_file)
+            kprobe_events: Optional[str] = self.target.read_value(self.kprobe_events_file)
         except TargetStableError:
             kprobe_events = None
 
@@ -261,10 +318,10 @@ class FtraceCollector(CollectorBase):
         # parameter, but unfortunately some events still end up there (e.g.
         # print event). So we still need to set that size, otherwise the buffer
         # might be too small and some event lost.
-        top_buffer_size = self.top_buffer_size if self.top_buffer_size else self.buffer_size
+        top_buffer_size: Optional[int] = self.top_buffer_size if self.top_buffer_size else self.buffer_size
         if top_buffer_size:
             self.target.write_value(
-                self.target.path.join(self.tracing_path, 'buffer_size_kb'),
+                self.target.path.join(self.tracing_path, 'buffer_size_kb') if self.target.path else '',
                 top_buffer_size, verify=False
             )
 
@@ -285,7 +342,7 @@ class FtraceCollector(CollectorBase):
             except TargetStableError as e:
                 self.logger.error(f'Could not trace CPUFreq frequencies as the cpufreq module cannot be loaded: {e}')
             else:
-                mod.trace_frequencies()
+                cast(CpufreqModule, mod).trace_frequencies()
 
     def _trace_idle(self):
         if 'cpu_idle' in self._selected_events:
@@ -295,20 +352,25 @@ class FtraceCollector(CollectorBase):
             except TargetStableError as e:
                 self.logger.error(f'Could not trace CPUIdle states as the cpuidle module cannot be loaded: {e}')
             else:
-                mod.perturb_cpus()
+                cast(Cpuidle, mod).perturb_cpus()
 
     @asyncf
-    async def start(self):
+    async def start(self) -> None:
+        """
+        Start capturing ftrace events according to the selected events/functions.
+
+        :raises TargetStableError: If the target is unrooted or tracing setup fails.
+        """
         self.start_time = time.time()
         if self._reset_needed:
             self.reset()
 
         if self.tracer is not None and 'function' in self.tracer:
-            tracecmd_functions = self.function_string
+            tracecmd_functions: Optional[str] = self.function_string
         else:
             tracecmd_functions = ''
 
-        tracer_string = '-p {}'.format(self.tracer) if self.tracer else ''
+        tracer_string: str = '-p {}'.format(self.tracer) if self.tracer else ''
 
         # Ensure kallsyms contains addresses if possible, so that function the
         # collected trace contains enough data for pretty printing
@@ -352,18 +414,20 @@ class FtraceCollector(CollectorBase):
         if self.functions and self.tracer is None:
             target = self.target
             await target.async_manager.concurrently(
-                execute.asyn('echo nop > {}'.format(self.current_tracer_file),
+                target.execute.asyn('echo nop > {}'.format(self.current_tracer_file),
                                     as_root=True),
-                execute.asyn('echo 0 > {}'.format(self.function_profile_file),
+                target.execute.asyn('echo 0 > {}'.format(self.function_profile_file),
+                                    as_root=True),  # type: ignore
+                target.execute.asyn('echo {} > {}'.format(self.function_string, self.ftrace_filter_file),
                                     as_root=True),
-                execute.asyn('echo {} > {}'.format(self.function_string, self.ftrace_filter_file),
-                                    as_root=True),
-                execute.asyn('echo 1 > {}'.format(self.function_profile_file),
+                target.execute.asyn('echo 1 > {}'.format(self.function_profile_file),
                                     as_root=True),
             )
 
-
-    def stop(self):
+    def stop(self) -> None:
+        """
+        Stop capturing ftrace events.
+        """
         # Disable kernel function profiling
         if self.functions and self.tracer is None:
             self.target.execute('echo 0 > {}'.format(self.function_profile_file),
@@ -388,16 +452,24 @@ class FtraceCollector(CollectorBase):
 
         self._reset_needed = True
 
-    def set_output(self, output_path):
+    def set_output(self, output_path: str) -> None:
         if os.path.isdir(output_path):
             output_path = os.path.join(output_path, os.path.basename(self.target_output_file))
         self.output_path = output_path
 
-    def get_data(self):
+    def get_data(self) -> CollectorOutput:
+        """
+        Pull the captured trace data from the target, optionally generate a report,
+        and return a :class:`CollectorOutput`.
+
+        :raises RuntimeError: If :attr:`output_path` is unset.
+        :return: A collector output referencing ftrace data.
+        :rtype: CollectorOutput
+        """
         if self.output_path is None:
             raise RuntimeError("Output path was not set.")
 
-        busybox = quote(self.target.busybox)
+        busybox = quote(self.target.busybox or '')
 
         mode = self.mode
         if mode == 'write-to-disk':
@@ -412,7 +484,7 @@ class FtraceCollector(CollectorBase):
         # The size of trace.dat will depend on how long trace-cmd was running.
         # Therefore timout for the pull command must also be adjusted
         # accordingly.
-        pull_timeout = 10 * (self.stop_time - self.start_time)
+        pull_timeout: float = 10 * (cast(float, self.stop_time) - cast(float, self.start_time))
         self.target.pull(self.target_output_file, self.output_path, timeout=pull_timeout)
         output = CollectorOutput()
         if not os.path.isfile(self.output_path):
@@ -420,7 +492,7 @@ class FtraceCollector(CollectorBase):
         else:
             output.append(CollectorOutputEntry(self.output_path, 'file'))
             if self.autoreport:
-                textfile = os.path.splitext(self.output_path)[0] + '.txt'
+                textfile: str = os.path.splitext(self.output_path)[0] + '.txt'
                 if self.report_on_target:
                     self.generate_report_on_target()
                     self.target.pull(self.target_text_file,
@@ -432,20 +504,27 @@ class FtraceCollector(CollectorBase):
                 self.view(self.output_path)
         return output
 
-    def get_stats(self, outfile):
+    def get_stats(self, outfile: str) -> Optional[Dict[int,
+                                                       Dict[str,
+                                                            Dict[str, Union[int, float]]]]]:
+        """
+        get the processing statistics for the cpu
+        :param outfile: path to the output file
+        :type outfile: str
+        """
         if not (self.functions and self.tracer is None):
-            return
+            return None
 
         if os.path.isdir(outfile):
             outfile = os.path.join(outfile, OUTPUT_PROFILE_FILE)
         # pylint: disable=protected-access
-        output = self.target._execute_util('ftrace_get_function_stats',
-                                            as_root=True)
+        output: str = self.target._execute_util('ftrace_get_function_stats',
+                                                as_root=True)
 
-        function_stats = {}
+        function_stats: Dict[int, Dict[str, Dict[str, Union[int, float]]]] = {}
         for line in output.splitlines():
             # Match a new CPU dataset
-            match = CPU_RE.search(line)
+            match: Optional[Match[str]] = CPU_RE.search(line)
             if match:
                 cpu_id = int(match.group(1))
                 function_stats[cpu_id] = {}
@@ -456,13 +535,13 @@ class FtraceCollector(CollectorBase):
             if match:
                 fname = match.group(1)
                 function_stats[cpu_id][fname] = {
-                        'hits' : int(match.group(2)),
-                        'time' : float(match.group(3)),
-                        'avg'  : float(match.group(4)),
-                        's_2'  : float(match.group(5)),
-                    }
+                    'hits': int(match.group(2)),
+                    'time': float(match.group(3)),
+                    'avg': float(match.group(4)),
+                    's_2': float(match.group(5)),
+                }
                 self.logger.debug(" %s: %s",
-                             fname, function_stats[cpu_id][fname])
+                                  fname, function_stats[cpu_id][fname])
 
         self.logger.debug("FTrace stats output [%s]...", outfile)
         with open(outfile, 'w') as fh:
@@ -471,15 +550,25 @@ class FtraceCollector(CollectorBase):
 
         return function_stats
 
-    def report(self, binfile, destfile):
+    def report(self, binfile: str, destfile: str) -> None:
+        """
+        Generate a textual report from a captured trace.dat file on the host.
+
+        :param binfile: The path to the binary trace file.
+        :type binfile: str
+        :param destfile: The path to write the report.
+        :type destfile: str
+        :raises TargetStableError: If trace-cmd returns a non-zero exit code.
+        :raises HostError: If trace-cmd is not found on the host.
+        """
         # To get the output of trace.dat, trace-cmd must be installed
         # This is done host-side because the generated file is very large
         try:
-            command = '{} report {} > {}'.format(self.host_binary, binfile, destfile)
+            command: str = '{} report {} > {}'.format(self.host_binary, binfile, destfile)
             self.logger.debug(command)
             process = subprocess.Popen(command, stderr=subprocess.PIPE, shell=True)
-            _, error = process.communicate()
-            error = error.decode(sys.stdout.encoding or 'utf-8', 'replace')
+            _, error_b = process.communicate()
+            error = error_b.decode(sys.stdout.encoding or 'utf-8', 'replace')
             if process.returncode:
                 raise TargetStableError('trace-cmd returned non-zero exit code {}'.format(process.returncode))
             if error:
@@ -500,34 +589,52 @@ class FtraceCollector(CollectorBase):
         except OSError:
             raise HostError('Could not find trace-cmd. Please make sure it is installed and is in PATH.')
 
-    def generate_report_on_target(self):
-        command = '{} report {} > {}'.format(self.target_binary,
-                                             self.target_output_file,
-                                             self.target_text_file)
+    def generate_report_on_target(self) -> None:
+        """
+        generate report on target
+        """
+        command: str = '{} report {} > {}'.format(self.target_binary,
+                                                  self.target_output_file,
+                                                  self.target_text_file)
         self.target.execute(command, timeout=TIMEOUT)
 
-    def view(self, binfile):
+    def view(self, binfile: str) -> None:
+        """
+        KernelShark is a graphical front-end tool for visualizing trace data collected by trace-cmd.
+        It allows users to view and analyze kernel tracing data in a more intuitive and interactive way.
+        """
         check_output('{} {}'.format(self.kernelshark, binfile), shell=True)
 
-    def teardown(self):
-        self.target.remove(self.target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE))
+    def teardown(self) -> None:
+        """
+        Remove the trace.dat file from the target, cleaning up after data collection.
+        """
+        self.target.remove(self.target.path.join(self.target.working_directory, OUTPUT_TRACE_FILE) if self.target.path else '')
 
-    def mark_start(self):
+    def mark_start(self) -> None:
+        """
+        Write a start marker into the ftrace marker file.
+        """
         self.target.write_value(self.marker_file, TRACE_MARKER_START, verify=False)
 
-    def mark_stop(self):
+    def mark_stop(self) -> None:
+        """
+        Write a stop marker into the ftrace marker file.
+        """
         self.target.write_value(self.marker_file, TRACE_MARKER_STOP, verify=False)
 
 
-def _build_trace_events(events):
-    event_string = ' '.join(['-e {}'.format(e) for e in events])
+def _build_trace_events(events: List[str]) -> str:
+    event_string: str = ' '.join(['-e {}'.format(e) for e in events])
     return event_string
 
-def _build_trace_functions(functions):
-    function_string = " ".join(functions)
+
+def _build_trace_functions(functions: List[str]) -> str:
+    function_string: str = " ".join(functions)
     return function_string
 
-def _build_graph_functions(functions, trace_children_functions):
+
+def _build_graph_functions(functions: List[str], trace_children_functions: bool) -> str:
     opt = 'g' if trace_children_functions else 'l'
     return ' '.join(
         '-{} {}'.format(opt, quote(f))
