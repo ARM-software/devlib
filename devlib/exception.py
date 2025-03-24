@@ -1,4 +1,4 @@
-#    Copyright 2013-2018 ARM Limited
+#    Copyright 2013-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,12 +14,16 @@
 #
 
 import subprocess
+from typing import cast, Optional, List
+
+from devlib.utils.annotation_helpers import SubprocessCommand
+
 
 class DevlibError(Exception):
     """Base class for all Devlib exceptions."""
 
-    def __init__(self, *args):
-        message = args[0] if args else None
+    def __init__(self, *args) -> None:
+        message: Optional[object] = args[0] if args else None
         self._message = message
 
     @property
@@ -73,18 +77,20 @@ class TargetStableError(TargetError, DevlibStableError):
 
 class TargetCalledProcessError(subprocess.CalledProcessError, TargetError):
     """Exception raised when a command executed on the target fails."""
-    def __str__(self):
-        msg = super().__str__()
-        def decode(s):
-            try:
-                s = s.decode()
-            except AttributeError:
-                s = str(s)
 
-            return s.strip()
+    def __str__(self) -> str:
+        msg = super().__str__()
+
+        def decode(s: bytes) -> str:
+            try:
+                st = s.decode()
+            except AttributeError:
+                st = str(s)
+
+            return st.strip()
 
         if self.stdout is not None and self.stderr is None:
-            out = ['OUTPUT: {}'.format(decode(self.output))]
+            out: List[str] = ['OUTPUT: {}'.format(decode(self.output))]
         else:
             out = [
                 'STDOUT: {}'.format(decode(self.output)) if self.output is not None else '',
@@ -124,13 +130,13 @@ class TimeoutError(DevlibTransientError):
     programming error (e.g. not setting long enough timers), it is often due to some failure in the
     environment, and there fore should be classed as a "user error"."""
 
-    def __init__(self, command, output):
-        super(TimeoutError, self).__init__('Timed out: {}'.format(command))
+    def __init__(self, command: Optional[SubprocessCommand], output: Optional[str]):
+        super(TimeoutError, self).__init__('Timed out: {}'.format(cast(str, command)))
         self.command = command
         self.output = output
 
     def __str__(self):
-        return '\n'.join([self.message, 'OUTPUT:', self.output or ''])
+        return '\n'.join([cast(str, self.message), 'OUTPUT:', self.output or ''])
 
 
 class WorkerThreadError(DevlibError):
