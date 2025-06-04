@@ -102,6 +102,7 @@ class ArmEnergyProbeInstrument(Instrument):
 
     def start(self):
         self.logger.debug(self.command)
+        # TODO - check if this preexec_fn arg can be replaced with start_new_session argument
         self.armprobe = subprocess.Popen(self.command,
                                        stderr=self.output_fd_error,
                                        preexec_fn=os.setpgrp,

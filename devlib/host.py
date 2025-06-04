@@ -144,8 +144,6 @@ class LocalConnection(ConnectionBase):
 
         # Make sure to get a new PGID so PopenBackgroundCommand() can kill
         # all sub processes that could be started without troubles.
-        def preexec_fn():
-            os.setpgrp()
 
         def make_init_kwargs(command):
             popen = subprocess.Popen(
@@ -154,7 +152,7 @@ class LocalConnection(ConnectionBase):
                 stderr=stderr,
                 stdin=subprocess.PIPE,
                 shell=True,
-                preexec_fn=preexec_fn,
+                start_new_session=True,
             )
             return dict(
                 popen=popen,

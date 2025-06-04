@@ -424,6 +424,21 @@ class PopenBackgroundCommand(BackgroundCommand):
         self.popen.__enter__()
         return self
 
+    def __exit__(self, *args, **kwargs):
+        # Send SIGINT to the process group to allow it to clean up if it is running
+        if self.popen and self.popen.poll() is None:
+            try:
+                os.killpg(self.popen.pid, signal.SIGINT)
+            except Exception:
+                pass
+            try:
+                # allow a graceful termination for 60 seconds
+                self.popen.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                # If the process did not terminate, send SIGKILL
+                os.killpg(self.popen.pid, signal.SIGKILL)
+                self.popen.wait()
+
 
 class ParamikoBackgroundCommand(BackgroundCommand):
     """
@@ -637,6 +652,21 @@ class AdbBackgroundCommand(BackgroundCommand):
         super().__enter__()
         self.adb_popen.__enter__()
         return self
+
+    def __exit__(self, *args, **kwargs):
+        # Send SIGINT to the process group to allow it to clean up if it is running
+        if self.adb_popen.poll() is None:
+            try:
+                os.killpg(self.adb_popen.pid, signal.SIGINT)
+            except Exception:
+                pass
+            try:
+                # allow a graceful termination for 60 seconds
+                self.adb_popen.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                # If the process did not terminate, send SIGKILL
+                os.killpg(self.adb_popen.pid, signal.SIGKILL)
+                self.adb_popen.wait()
 
 
 class TransferManager:
