@@ -687,7 +687,8 @@ def adb_background_shell(conn, command,
     adb_cmd = get_adb_command(device, 'shell', adb_server, adb_port)
     full_command = f'{adb_cmd} {quote(command)}'
     logger.debug(full_command)
-    p = subprocess.Popen(full_command, stdout=stdout, stderr=stderr, stdin=subprocess.PIPE, shell=True)
+    p = subprocess.Popen(full_command, stdout=stdout, stderr=stderr, stdin=subprocess.PIPE, shell=True,
+                         start_new_session=True)
 
     # Out of band PID lookup, to avoid conflicting needs with stdout redirection
     grep_cmd = f'{busybox} grep {quote(command_uuid)}'

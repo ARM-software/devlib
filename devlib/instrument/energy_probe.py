@@ -75,6 +75,7 @@ class EnergyProbeInstrument(Instrument):
 
     def start(self):
         self.logger.debug(self.command)
+        # TODO - check if this preexec_fn arg can be replaced with start_new_session argument
         self.process = subprocess.Popen(self.command,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE,
