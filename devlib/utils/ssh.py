@@ -425,16 +425,55 @@ class SshConnection(SshConnectionBase):
                     self.strict_host_check
                 ))
             client.set_missing_host_key_policy(policy)
-            client.connect(
-                hostname=self.host,
-                port=self.port,
-                username=self.username,
-                password=self.password,
-                key_filename=self.keyfile,
-                timeout=self.timeout,
-                look_for_keys=check_ssh_keys,
-                allow_agent=check_ssh_keys
-            )
+
+            get_time = time.monotonic
+            start = get_time()
+            timeout = self.timeout
+            while True:
+                try:
+                    client.connect(
+                        hostname=self.host,
+                        port=self.port,
+                        username=self.username,
+                        password=self.password,
+                        key_filename=self.keyfile,
+                        timeout=timeout,
+                        banner_timeout=timeout,
+                        channel_timeout=timeout,
+                        auth_timeout=timeout,
+                        look_for_keys=check_ssh_keys,
+                        allow_agent=check_ssh_keys
+                    )
+                # There does not seem to be any *_timeout parameter that waits
+                # until the hostname is available, so we implement it manually
+                # here.
+                except paramiko.ssh_exception.NoValidConnectionsError as e:
+                    elapsed = get_time() - start
+                    timeout = self.timeout - elapsed
+                    if timeout > 0:
+                        sleep = min(
+                            # Wait a good chunk of time before retrying.
+                            self.timeout / 10,
+                            # We still want to be able to connect ASAP, so we
+                            # don't wait too long either until we retry. If the
+                            # user timeout is very large, we don't want to end
+                            # up waiting e.g. 10s before retrying.
+                            1,
+                            # Never sleep for longer than the remaining duration
+                            max(
+                                timeout / 2,
+                                # Do not sleep less than X ms, otherwise we
+                                # would end up splitting the remaining time
+                                # into ever-thinner sleeps
+                                50e-3,
+                            )
+                        )
+                        time.sleep(sleep)
+                        continue
+                    else:
+                        raise e
+                else:
+                    break
 
             return client
 
