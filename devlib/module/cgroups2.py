@@ -1,4 +1,4 @@
-#    Copyright 2022 ARM Limited
+#    Copyright 2022-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -101,10 +101,13 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
 from shlex import quote
-from typing import Dict, Set, List, Union, Any
+from typing import (Dict, Set, List, Union, Any,
+                    Tuple, cast, Callable, Optional)
+from collections.abc import Generator
+from contextlib import _GeneratorContextManager
 from uuid import uuid4
 
-from devlib import LinuxTarget
+from devlib.target import LinuxTarget
 from devlib.exception import (
     TargetStableCalledProcessError,
     TargetStableError,
@@ -112,16 +115,17 @@ from devlib.exception import (
 from devlib.target import FstabEntry
 from devlib.utils.misc import memoized
 
+# dictionary type frequently being used in this module
+ControllerDict = Dict[str, Dict[str, Union[str, int]]]
+
 
 def _is_systemd_online(target: LinuxTarget):
     """
     Determines if systemd is activated on the target system.
 
     :param target: Interface to the target device.
-    :type target: Target
 
     :return: Returns ``True`` if systemd is active, ``False`` otherwise.
-    :rtype: bool
     """
 
     try:
@@ -132,19 +136,16 @@ def _is_systemd_online(target: LinuxTarget):
         return True
 
 
-def _read_lines(target: LinuxTarget, path: str):
+def _read_lines(target: LinuxTarget, path: str) -> List[str]:
     """
     Reads the lines of a file stored on the target device.
 
     :param target: Interface to target device.
-    :type target: Target
 
     :param path: The path to the file to be read.
-    :type path: str
 
     :return: A list of the words/sentences that result from splitting
         the read file (trailing and leading white-spaces removed) delimiting on the new-line character.
-    :rtype: List[str]
     """
 
     return target.read_value(path=path).split("\n")
@@ -157,19 +158,20 @@ def _add_controller_versions(controllers: Dict[str, Dict[str, int]]):
     :param controllers: A dictionary mapping ``str`` controller names to dictionaries,
         where the later dictionary contains ``hierarchy`` and ``num_cgroup`` keys mapped to their
         respective suitable ``int`` values.
-    :type controllers: Dict[str, Dict[str, int]]
 
     :return: A dictionary mapping ``str`` controller names to dictionaries,
         where the later dictionary contains an appended ``version`` key which maps to an ``int``
         value representing the version of the respective controller if applicable.
-    :rtype: Dict[str, Dict[str,int]]
     """
 
     # Read how the controller versions can be determined here:
     # https://man7.org/linux/man-pages/man7/cgroups.7.html
     # (Under NOTES) [Dated 12/08/2022]
 
-    def infer_version(config):
+    def infer_version(config: Dict[str, int]) -> Optional[int]:
+        """
+        determine the controller version
+        """
         if config["hierarchy"] != 0:
             return 1
         elif config["hierarchy"] == 0 and config["num_cgroups"] > 1:
@@ -188,31 +190,31 @@ def _add_controller_versions(controllers: Dict[str, Dict[str, int]]):
 
 def _add_controller_mounts(
     controllers: Dict[str, Dict[str, int]], target_fs_list: List[FstabEntry]
-):
+) -> Dict[str, Dict[str, Union[str, int]]]:
     """
     Find the CGroup controller's mount point and adds it as ``mount_point`` key.
 
     :param controllers: A dictionary mapping ``str`` controller names to dictionaries,
         where the later dictionary contains `hierarchy``, ``num_cgroup`` and if appropriate ``version``
         keys mapped to their respective suitable ``int`` values.
-    :type controllers: Dict[str, Dict[str, int]]
 
     :param target_fs_list: A list of entries of the NamedTuple type ``FstabEntry``,
         where each represents a mounted filesystem on the target device.
-    :type target_fs: List[FstabEntry]
 
     :return: A dictionary mapping ``str`` controller names to dictionaries,
         where the later dictionary contains an appended ``mount_point`` key which maps to the suitable
         ``str`` value of the respective controllers if applicable.
-    :rtype: Dict[str, Dict[str, Union[str,int]]]
     """
 
     # Filter the mounted filesystems on the target device, obtaining the respective V1/V2 FstabEntries.
-    v1_mounts = [fs for fs in target_fs_list if fs.fs_type == "cgroup"]
-    v2_mounts = [fs for fs in target_fs_list if fs.fs_type == "cgroup2"]
+    v1_mounts: List[FstabEntry] = [fs for fs in target_fs_list if fs.fs_type == "cgroup"]
+    v2_mounts: List[FstabEntry] = [fs for fs in target_fs_list if fs.fs_type == "cgroup2"]
 
-    def _infer_mount(controller: str, configuration: Dict):
-        controller_version = configuration.get("version")
+    def _infer_mount(controller: str, configuration: Dict[str, int]) -> Optional[str]:
+        """
+        determine the controller mount point
+        """
+        controller_version: Optional[int] = configuration.get("version")
         if controller_version == 1:
             for mount in v1_mounts:
                 if controller in mount.options.strip().split(","):
@@ -225,7 +227,7 @@ def _add_controller_mounts(
 
         return None
 
-    return {
+    return cast(Dict[str, Dict[str, Union[str, int]]], {
         controller: {**config, "mount_point": path if path is not None else config}
         for (controller, config, path) in (
             (
@@ -235,20 +237,18 @@ def _add_controller_mounts(
             )
             for (controller, config) in controllers.items()
         )
-    }
+    })
 
 
-def _get_cgroup_controllers(target: LinuxTarget):
+def _get_cgroup_controllers(target: LinuxTarget) -> ControllerDict:
     """
     Returns the CGroup controllers that are currently enabled on the target device, alongside their appropriate configurations.
 
     :param target: Interface to target device.
-    :type target: Target
 
     :return: A dictionary of controller name keys to dictionary value mappings,
         where the secondary dictionary contains a mapping between various CGroup controller configuration keys
         and their respectively obtained values for the respective CGroup controllers.
-    :rtype: Dict[str, Dict[str,Union[str,int]]]
     """
 
     # A snippet of the /proc/cgroup is shown below. The column entries are separated
@@ -261,15 +261,19 @@ def _get_cgroup_controllers(target: LinuxTarget):
         r"^(?!#)(?P<name>.+)\t(?P<hierarchy>.+)\t(?P<num_cgroups>.+)\t(?P<enabled>.+)"
     )
 
-    proc_cgroup_file = _read_lines(target=target, path="/proc/cgroups")
+    proc_cgroup_file: List[str] = _read_lines(target=target, path="/proc/cgroups")
 
-    def _parse_controllers(controller):
+    def _parse_controllers(controller: str) -> Union[Tuple[str, Dict[str, int]],
+                                                     Tuple[None, None]]:
+        """
+        parse the controllers information from cgroups file
+        """
         match = PROC_MOUNT_REGEX.match(controller.strip())
         if match:
-            name = match.group("name")
-            enabled = int(match.group("enabled"))
-            hierarchy = int(match.group("hierarchy"))
-            num_cgroups = int(match.group("num_cgroups"))
+            name: str = match.group("name")
+            enabled: int = int(match.group("enabled"))
+            hierarchy: int = int(match.group("hierarchy"))
+            num_cgroups: int = int(match.group("num_cgroups"))
             # We should ignore disabled controllers.
             if enabled != 0:
                 config = {
@@ -279,9 +283,9 @@ def _get_cgroup_controllers(target: LinuxTarget):
                 return (name, config)
         return (None, None)
 
-    controllers = dict(map(_parse_controllers, proc_cgroup_file))
-    controllers.pop(None)
-    controllers = _add_controller_versions(controllers=controllers)
+    controllers_temp = dict(map(_parse_controllers, proc_cgroup_file))
+    controllers_temp.pop(None)
+    controllers = _add_controller_versions(controllers=cast(Dict[str, Dict[str, int]], controllers_temp))
     controllers = _add_controller_mounts(
         controllers=controllers,
         target_fs_list=target.list_file_systems(),
@@ -291,12 +295,11 @@ def _get_cgroup_controllers(target: LinuxTarget):
 
 
 @contextmanager
-def _request_delegation(target: LinuxTarget):
+def _request_delegation(target: LinuxTarget) -> Generator[int, None, None]:
     """
     Requests systemd to delegate a subtree CGroup hierarchy to our transient service unit.
 
     :yield: The Main PID of the delegated transient service unit.
-    :rtype: int
     """
 
     service_name = "devlib-" + str(uuid.uuid4().hex)
@@ -304,7 +307,7 @@ def _request_delegation(target: LinuxTarget):
     try:
         target.execute(
             'systemd-run --no-block --property Delegate="yes" --unit {name} --quiet {busybox} sh -c "while true; do sleep 1d; done"'.format(
-                name=quote(service_name), busybox=quote(target.busybox)
+                name=quote(service_name), busybox=quote(target.busybox or '')
             ),
             as_root=True,
         )
@@ -326,15 +329,13 @@ def _request_delegation(target: LinuxTarget):
 
 
 @contextmanager
-def _mount_v2_controllers(target: LinuxTarget):
+def _mount_v2_controllers(target: LinuxTarget) -> Generator[str, None, None]:
     """
     Mounts the V2 unified CGroup controller hierarchy.
 
     :param target: Interface to target device.
-    :type target: Target
 
     :yield: The path to the root of the mounted V2 controller hierarchy.
-    :rtype: str
 
     :raises TargetStableError: Occurs in the case where the root directory of the requested CGroup V2 Controller hierarchy
         is unable to be created up on the target system.
@@ -344,7 +345,7 @@ def _mount_v2_controllers(target: LinuxTarget):
         try:
             target.execute(
                 "{busybox} mount -t cgroup2 none {path}".format(
-                    busybox=quote(target.busybox), path=quote(path)
+                    busybox=quote(target.busybox or ''), path=quote(path)
                 ),
                 as_root=True,
             )
@@ -352,7 +353,7 @@ def _mount_v2_controllers(target: LinuxTarget):
         finally:
             target.execute(
                 "{busybox} umount {path}".format(
-                    busybox=quote(target.busybox),
+                    busybox=quote(target.busybox or ''),
                     path=quote(path),
                 ),
                 as_root=True,
@@ -360,18 +361,15 @@ def _mount_v2_controllers(target: LinuxTarget):
 
 
 @contextmanager
-def _mount_v1_controllers(target: LinuxTarget, controllers: Set[str]):
+def _mount_v1_controllers(target: LinuxTarget, controllers: Set[str]) -> Generator[Dict[str, str], None, None]:
     """
     Mounts the V1 split CGroup controller hierarchies.
 
     :param target: Interface to target device.
-    :type target: Target
 
     :param controllers: The names of the CGroup controllers required to be mounted.
-    :type controllers: Set[str]
 
     :yield: A dictionary mapping CGroup controller names to the paths that they're currently mounted at.
-    :rtype: Dict[str,str]
 
     :raises TargetStableError: Occurs in the case where the root directory of a requested CGroup V1 Controller hierarchy
         is unable to be created up on the target system.
@@ -385,7 +383,7 @@ def _mount_v1_controllers(target: LinuxTarget, controllers: Set[str]):
             try:
                 target.execute(
                     "{busybox} mount -t cgroup -o {controller} none {path}".format(
-                        busybox=quote(target.busybox),
+                        busybox=quote(target.busybox or ''),
                         controller=quote(controller),
                         path=quote(path),
                     ),
@@ -395,7 +393,7 @@ def _mount_v1_controllers(target: LinuxTarget, controllers: Set[str]):
             finally:
                 target.execute(
                     "{busybox} umount {path}".format(
-                        busybox=quote(target.busybox),
+                        busybox=quote(target.busybox or ''),
                         path=quote(path),
                     ),
                     as_root=True,
@@ -409,17 +407,15 @@ def _mount_v1_controllers(target: LinuxTarget, controllers: Set[str]):
 
 
 def _validate_requested_hierarchy(
-    requested_controllers: Set[str], available_controllers: Dict
-):
+    requested_controllers: Set[str], available_controllers: Dict[str, Any]
+) -> None:
     """
     Validates that the requested hierarchy is valid using the controllers available on the target system.
 
     :param requested_controllers: A set of ``str``, representing the controllers that are requested to be used in the
         user defined hierarchy.
-    :type requested_controllers: Set[str]
 
     :param available_controllers: A dictionary where the primary keys represent the available CGroup controllers on the target system.
-    :type available_controllers: Dict
 
     :raises TargetStableError: Occurs in the case where the requested CGroup hierarchy is unable to be
         set up on the target system.
@@ -428,7 +424,7 @@ def _validate_requested_hierarchy(
     # Will determine if there are any controllers present within the requested controllers
     # and not within the available controllers
 
-    diff = set(requested_controllers) - available_controllers.keys()
+    diff: Set[str] = set(requested_controllers) - available_controllers.keys()
 
     if diff:
         raise TargetStableError(
@@ -441,25 +437,21 @@ class _CGroupBase(ABC):
     The abstract base class that all CGroup class types' subclass.
 
     :param name: The name assigned to the CGroup. Used to identify the CGroup and define the CGroup directory name.
-    :type name: str
 
     :param parent_path: The path to the parent CGroup this CGroup is a child of.
-    :type parent_path: str
 
     :param active_controllers: A dictionary of CGroup controller name keys to dictionary value mappings,
         where the secondary dictionary contains a mapping between a specific 'attribute' of the aforementioned
         controller and a value for which that controller interface file should be set to.
-    :type active_controllers: Dict[str, Dict[str, Union[str,int]]]
 
     :param target: Interface to target device.
-    :type target: Target
     """
 
     def __init__(
         self,
         name: str,
         parent_path: str,
-        active_controllers: Dict[str, Dict[str, str]],
+        active_controllers: ControllerDict,
         target: LinuxTarget,
     ):
         self.name = name
@@ -468,77 +460,71 @@ class _CGroupBase(ABC):
         self._parent_path = parent_path
 
     @property
-    def group_path(self):
+    def group_path(self) -> str:
         return self.target.path.join(self._parent_path, self.name)
 
     def _set_controller_attribute(
         self, controller: str, attribute: str, value: Union[int, str], verify=False
-    ):
+    ) -> None:
         """
         Writes the specified ``value`` into the interface file specified by the ``controller`` and ``attribute`` parameters.
         In the case where no ``controller`` name is specified, the ``attribute`` argument is assumed to be the name of the
         interface file to write to.
 
         :param controller: The controller we want to select.
-        :type controller: str
 
         :param attribute: The specific attribute of the controller we want to alter.
-        :type attribute: str
 
         :param value: The value we want to write to the specified interface file.
-        :type value: str
 
         :param verify: Whether we want to verify that the value is indeed written to the interface file, defaults to ``False``.
-        :type verify: bool, optional
         """
 
         str_value = str(value)
 
         # Some CGroup interface files don't have a controller name prefix, we accommodate that here.
-        interface_file = controller + "." + attribute if controller else attribute
+        interface_file: str = controller + "." + attribute if controller else attribute
 
-        full_path = self.target.path.join(self.group_path, interface_file)
+        full_path: str = self.target.path.join(self.group_path, interface_file)
 
         self.target.write_value(full_path, str_value, verify=verify)
 
-    def _create_directory(self, path: str):
+    def _create_directory(self, path: str) -> None:
         """
         Creates a new directory at the given path, creating the parent directories if required.
         If the directory already exists, no exception is thrown.
 
         :param path: Path to directory to be created.
-        :type path: str
         """
 
         self.target.makedirs(path, as_root=True)
 
-    def _delete_directory(self, path: str):
+    def _delete_directory(self, path: str) -> None:
         """
         Removes the directory at the given path.
 
         :param path: Path to the directory to be removed.
-        :type path: str
         """
 
         # In this context we can't use the target.remove method since that
         # tries to delete the interface/controller files as well which isn't needed nor permitted.
         self.target.execute(
             "{busybox} rmdir -- {path}".format(
-                busybox=quote(self.target.busybox), path=quote(path)
+                busybox=quote(self.target.busybox or ''), path=quote(path)
             ),
             as_root=True,
         )
 
-    def _add_process(self, pid: Union[str, int]):
+    def _add_process(self, pid: Union[str, int]) -> Optional[TargetStableError]:
         """
         Adds the process associated with the ``pid`` to the CGroup, only if
         the process is not already a member of the CGroup.
 
         :param pid: The PID of the process to be added to the CGroup.
-        :type pid: Union[str,int]
         """
 
         if not self.target.file_exists(filepath="/proc/{pid}/status".format(pid=pid)):
+            # FIXME - is this return of the error intentional or was it meant to be raised
             return TargetStableError(
                 "The Process ID: {pid} does not exists.".format(pid=pid)
             )
@@ -558,18 +544,17 @@ class _CGroupBase(ABC):
         else:
             if str(pid) not in member_processes:
                 self._set_controller_attribute("cgroup", "procs", pid)
+        return None
 
-    def _get_pid_from_tid(self, tid: int):
+    def _get_pid_from_tid(self, tid: int) -> int:
         """
         Retrieves the ``pid`` (Process ID) that the ``tid`` (Thread ID) is a part of.
 
         :param tid: The Thread ID of the thread to be added to the CGroup.
-        :type tid: int
 
         :return: The ``pid`` (Process ID) associated with the ``tid`` (Thread ID).
-        :rtype: int
         """
-        status = _read_lines(
+        status: List[str] = _read_lines(
             target=self.target, path="/proc/{tid}/status".format(tid=tid)
         )
         for line in status:
@@ -577,7 +562,7 @@ class _CGroupBase(ABC):
             # the process this thread belongs to.
             match = re.match(r"\s*Tgid:\s*(\d+)\s*", line)
             if match:
-                pid = match.group(1)
+                pid: str = match.group(1)
                 break
         else:
             raise TargetStableError(
@@ -587,7 +572,7 @@ class _CGroupBase(ABC):
         return int(pid)
 
     @abstractmethod
-    def _add_thread(self, tid: int, threaded_domain):
+    def _add_thread(self, tid: int, threaded_domain: Union['ResponseTree', '_TreeBase']):
         """
         Ensures all sub-classes have the ability to add threads to their CGroups where
         their differences dont allow for a common approach.
@@ -595,7 +580,7 @@ class _CGroupBase(ABC):
         pass
 
     @abstractmethod
-    def _init_cgroup(self):
+    def _init_cgroup(self) -> None:
         """
         Ensures all sub-classes are able to initialise their respective CGroup directories
         as per defined by their user configurations.
@@ -622,33 +607,27 @@ class _CGroupV2(_CGroupBase):
     A Class representing a CGroup directory within a CGroup V2 hierarchy.
 
     :param name: The name assigned to the CGroup. Used to identify the CGroup and define the CGroup folder name.
-    :type name: str
 
     :param parent_path: The path to the parent CGroup this CGroup is a child of.
-    :type parent_path: str
 
     :param active_controllers: A dictionary of controller name keys to dictionary value mappings,
         where the secondary dictionary contains a mapping between a specific 'attribute' of the aforementioned
         controller and a value for which that controller interface file should be set to.
-    :type active_controllers: Dict[str, Dict[str, Union[str,int]]]
 
     :param subtree_controllers:  The controllers that should be delegated to the subtree.
-    :type subtree_controllers: Set[str]
 
     :param is_threaded: Whether the CGroup type is threaded,
         enables thread level granularity for the CGroup directory and its subtree.
-    :type is_threaded: bool
 
     :param target: Interface to target device.
-    :type target: Target
     """
 
     def __init__(
         self,
         name: str,
         parent_path: str,
-        active_controllers: Dict[str, Dict[str, str]],
-        subtree_controllers: set,
+        active_controllers: ControllerDict,
+        subtree_controllers: set[str],
         is_threaded: bool,
         target: LinuxTarget,
     ):
@@ -686,7 +665,7 @@ class _CGroupV2(_CGroupBase):
     def __exit__(self, *exc):
         self._delete_directory(path=self.group_path)
 
-    def _init_cgroup(self):
+    def _init_cgroup(self) -> None:
         """
         Performs the required steps in order to initialize the CGroup to the user specified configuration:
 
@@ -727,7 +706,7 @@ class _CGroupV2(_CGroupBase):
                 value="+{cont}".format(cont=controller),
             )
 
-    def _add_thread(self, tid: int, threaded_domain):
+    def _add_thread(self, tid: int, threaded_domain: Union['ResponseTree', '_TreeBase']) -> None:
         """
         Attempts to add the thread associated with ``tid`` to the CGroup.
         Due to the requirements imposed by the kernel regarding thread management within a V2 CGroup hierarchy,
@@ -737,17 +716,16 @@ class _CGroupV2(_CGroupBase):
         across the entire subtree.
 
         :param tid: The TID (Thread ID) of the thread to be added to the CGroup.
-        :type tid: int
 
         :param threaded_domain: The :class:`ResponseTree` object representing the threaded domain
             of the threaded CGroup subtree. The process will be added to all the CGroups
             that the :class:`ResponseTree` represent.
-        :type threaded_domain: :class:`ResponseTree`
+
         """
 
-        pid_of_tid = self._get_pid_from_tid(tid=tid)
+        pid_of_tid: int = self._get_pid_from_tid(tid=tid)
 
-        for low_level in threaded_domain.low_levels.values():
+        for low_level in cast(ResponseTree, threaded_domain).low_levels.values():
             low_level._add_process(pid_of_tid)
 
         self._set_controller_attribute(
@@ -762,19 +740,16 @@ class _CGroupV2Root(_CGroupV2):
     CGroup hierarchy.
 
     :param mount_point: The path on which the root of the CGroup V2 hierarchy is mounted on.
-    :type mount_point: str
 
     :param subtree_controllers:  The controllers that should be delegated to the subtree.
-    :type subtree_controllers: Set[str]
 
     :param target: Interface to target device.
-    :type target: Target
     """
 
     @classmethod
     def _v2_controller_translation(
-        cls, controllers: Dict[str, Dict[str, Union[str, int]]]
-    ):
+        cls, controllers: ControllerDict
+    ) -> ControllerDict:
         """
         Given the new controller names within V2, rename the controllers to provide CGroupV2 compatibility.
         At this point in time, the ``blkio`` controller has been renamed to ``io`` in V2, while the V2 ``cpu`` controller
@@ -783,7 +758,6 @@ class _CGroupV2Root(_CGroupV2):
         :param controllers: A dictionary of controller name keys to dictionary value mappings,
             where the secondary dictionary contains a mapping between the ``version`` and `mount_point``
             keys and their respectively obtained values.
-        :rtype: Dict[str, Dict[str,Union[str,int]]]
 
         :raises TargetStableError: In the case where the the ``cpu`` and ``cpuacct`` CGroup controllers are in use
             under different CGroup version hierarchies.
@@ -791,10 +765,9 @@ class _CGroupV2Root(_CGroupV2):
         :raises TargetStableError: In the case where either ``cpu`` / ``cpuacct`` controller is not enabled on the target device.
 
         :return: The amended ``controllers`` dictionary with the updated names.
-        :rtype: Dict[str, Dict[str, Union[str,int]]]
         """
 
-        translation = {}
+        translation: ControllerDict = {}
 
         if "blkio" in controllers:
             translation["io"] = controllers["blkio"]
@@ -824,22 +797,19 @@ class _CGroupV2Root(_CGroupV2):
         }
 
     @classmethod
-    def _get_delegated_sub_path(cls, delegated_pid: int, target: LinuxTarget):
+    def _get_delegated_sub_path(cls, delegated_pid: int, target: LinuxTarget) -> Optional[str]:
         """
         Returns the relative sub-path the delegated root of the V2 hierarchy is mounted on, via the parsing
         of the /proc/<PID>/cgroup file of the delegated process associated with ``delegated_pid``.
 
         :param delegated_pid: The Main PID of the transient service unit we requested delegation for.
-        :type delegated_pid: int
 
         :param target: Interface to target device.
-        :type target: Target
 
         :return: The sub-path to the delegate root of the V2 CGroup hierarchy.
-        :rtype: str
         """
 
-        relative_delegated_mount_paths = _read_lines(
+        relative_delegated_mount_paths: List[str] = _read_lines(
             target=target, path="/proc/{pid}/cgroup".format(pid=delegated_pid)
         )
 
@@ -854,11 +824,12 @@ class _CGroupV2Root(_CGroupV2):
                 raise TargetStableError(
                     "A V2 CGroup hierarchy was not delegated by systemd."
                 )
+        return None
 
     @classmethod
     def _get_available_controllers(
-        cls, controllers: Dict[str, Dict[str, Union[str, int]]]
-    ):
+        cls, controllers: ControllerDict
+    ) -> ControllerDict:
         """
         Returns the CGroup controllers that are currently not in use on the target device,
         which can be taken control over and used in a manually mounted V2 hierarchy.
@@ -867,17 +838,15 @@ class _CGroupV2Root(_CGroupV2):
         :param controllers: A dictionary of CGroup controller name keys to dictionary value mappings,
             where the secondary dictionary contains a mapping between various CGroup controller configuration keys
             and their respectively obtained values for the respective CGroup controllers.
-        :rtype: Dict[str, Dict[str,Union[str,int]]]
 
         :raises TargetStableError: Occurs in the case where a V2 hierarchy is already mounted on the target device.
             We want to bail out in this case.
 
         :return: The ``controllers`` Dict filtered to just those controllers which are free/un-used.
-        :rtype: Dict[str, Dict[str, Union[str,int]]]
         """
 
         # Filters the controllers dict to entries where the version is == 2.
-        mounted_v2_controllers = {
+        mounted_v2_controllers: Set[str] = {
             controller
             for controller, configuration in controllers.items()
             if (configuration.get("version") == 2)
@@ -896,8 +865,8 @@ class _CGroupV2Root(_CGroupV2):
 
     @classmethod
     def _path_to_delegated_root(
-        cls, controllers: Dict[str, Dict[str, Union[int, str]]], sub_path: str
-    ):
+        cls, controllers: ControllerDict, sub_path: str
+    ) -> str:
         """
         Return the full path to the delegated root. This occurs in 2 stages:
 
@@ -911,19 +880,16 @@ class _CGroupV2Root(_CGroupV2):
         :param controllers: A Dictionary of currently mounted controller name keys to Dictionary value mappings,
             where the secondary dictionary contains a mapping between various CGroup controller configuration keys
             and their respectively obtained values for the respective CGroup controllers.
-        :type controllers: Dict[str, Dict[str, Union[str,int]]]
 
         :param sub_path: The relative subpath to the delegated root hierarchy.
-        :type sub_path: str
 
         :raises TargetStableError: Occurs in the case where no V2 controllers are active on the target.
 
         :return: A full path to the delegated root of the V2 CGroup hierarchy.
-        :rtype: str
         """
 
         # Filter out non v2 controller mounts and append the "mount_point" to a set
-        v2_mount_point = {
+        v2_mount_point: Set[Union[str, int]] = {
             configuration["mount_point"]
             for configuration in controllers.values()
             if configuration.get("version") == 2
@@ -934,36 +900,32 @@ class _CGroupV2Root(_CGroupV2):
             )
         else:
             # Since there can only be a single V2 hierarchy (ignoring bind mounts), this should be totally legal.
-            mount_path_to_unified_hierarchy = v2_mount_point.pop()
-            return str(os.path.join(mount_path_to_unified_hierarchy, sub_path))
+            mount_path_to_unified_hierarchy: Union[str, int] = v2_mount_point.pop()
+            return str(os.path.join(cast(str, mount_path_to_unified_hierarchy), sub_path))
 
     @classmethod
     @contextmanager
     def _systemd_offline_mount(
         cls,
         target: LinuxTarget,
-        all_controllers: Dict[str, Dict[str, Union[str, int]]],
+        all_controllers: ControllerDict,
         requested_controllers: Set[str],
-    ):
+    ) -> Generator[str, None, None]:
         """
         Manually mounts the V2 hierarchy on the target device. Occurs in the absence of systemd.
 
         :param target: Interface to target device.
-        :type target: Target
 
         :param all_controllers: A Dictionary of currently mounted controller name keys to Dictionary value mappings,
             where the secondary dictionary contains a mapping between various CGroup controller configuration keys
             and their respectively obtained values for the respective CGroup controllers.
-        :type controllers: Dict[str, Dict[str, Union[str,int]]]
 
         :param requested_controllers: The set of controllers required to mount the requested hierarchy.
-        :type requested_controllers: Set[str]
 
         :yield: The path to the root mount point of the unified V2 hierarchy.
-        :rtype: str
         """
 
-        unused_controllers = _CGroupV2Root._get_available_controllers(
+        unused_controllers: ControllerDict = _CGroupV2Root._get_available_controllers(
             controllers=all_controllers
         )
         _validate_requested_hierarchy(
@@ -979,36 +941,32 @@ class _CGroupV2Root(_CGroupV2):
     def _systemd_online_setup(
         cls,
         target: LinuxTarget,
-        all_controllers: Dict[str, Dict[str, int]],
+        all_controllers: ControllerDict,
         requested_controllers: Set[str],
-    ):
+    ) -> Generator[str, None, None]:
         """
         Sets up the required V2 hierarchy on the target device. Occurs in the presence of systemd.
 
         :param target: Interface to target device.
-        :type target: Target
 
         :param all_controllers: A Dictionary of currently mounted CGroup controller name keys to dictionary value mappings,
             where the secondary dictionary contains a mapping between various CGroup controller configuration keys
             and their respectively obtained values for the respective CGroup controllers.
-        :type all_controllers: Dict[str, Dict[str, Union[str,int]]]
 
         :param requested_controllers: The set of controllers required to mount the requested hierarchy.
-        :type requested_controllers: Set[str]
 
         :yield: The path to the root of the delegated V2 CGroup hierarchy.
-        :rtype: str
         """
         with _request_delegation(target=target) as main_pid:
-            delegated_sub_path = _CGroupV2Root._get_delegated_sub_path(
+            delegated_sub_path: Optional[str] = _CGroupV2Root._get_delegated_sub_path(
                 delegated_pid=main_pid, target=target
             )
-            delegated_path = _CGroupV2Root._path_to_delegated_root(
+            delegated_path: str = _CGroupV2Root._path_to_delegated_root(
                 controllers=all_controllers,
-                sub_path=delegated_sub_path,
+                sub_path=cast(str, delegated_sub_path),
             )
 
-            delegated_controllers_path = "{path}/cgroup.controllers".format(
+            delegated_controllers_path: str = "{path}/cgroup.controllers".format(
                 path=delegated_path
             )
 
@@ -1018,7 +976,7 @@ class _CGroupV2Root(_CGroupV2):
             # by _read_file and splitting said element (str) using the white space character
             # as the delimiter.
             # (The _validate_requested_hierarchy requires the available_controllers argument to be a dict, necessitating this dict structure.)
-            delegated_controllers = {
+            delegated_controllers: Dict[str, None] = {
                 controller: None
                 for controller in _read_lines(
                     target=target, path=delegated_controllers_path
@@ -1033,28 +991,25 @@ class _CGroupV2Root(_CGroupV2):
 
     @classmethod
     @contextmanager
-    def _mount_filesystem(cls, target: LinuxTarget, requested_controllers: Set[str]):
+    def _mount_filesystem(cls, target: LinuxTarget, requested_controllers: Set[str]) -> Generator[str, None, None]:
         """
         Mounts/Sets-up a V2 hierarchy on the target device, covering contexts where
         systemd is both present and absent.
 
         :param target: Interface to target device.
-        :type target: Target
 
         :param requested_controllers: The set of controllers required to mount the requested hierarchy.
-        :type requested_controllers: Set[str]
 
         :yield: A path to the root of the V2 hierarchy that has been mounted/delegated for the user.
-        :rtype: str
         """
 
-        systemd_online = _is_systemd_online(target=target)
-        controllers = _CGroupV2Root._v2_controller_translation(
+        systemd_online: bool = _is_systemd_online(target=target)
+        controllers: ControllerDict = _CGroupV2Root._v2_controller_translation(
             _get_cgroup_controllers(target=target)
         )
 
         if systemd_online:
-            cm = _CGroupV2Root._systemd_online_setup(
+            cm: _GeneratorContextManager[str] = _CGroupV2Root._systemd_online_setup(
                 target=target,
                 all_controllers=controllers,
                 requested_controllers=requested_controllers,
@@ -1074,7 +1029,7 @@ class _CGroupV2Root(_CGroupV2):
     def __init__(
         self,
         mount_point: str,
-        subtree_controllers: set,
+        subtree_controllers: set[str],
         target: LinuxTarget,
     ):
 
@@ -1088,7 +1043,7 @@ class _CGroupV2Root(_CGroupV2):
             is_threaded=False,
             target=target,
         )
-        self.target = target
+        self.target: LinuxTarget = target
 
     def __enter__(self):
         """
@@ -1113,7 +1068,7 @@ class _CGroupV2Root(_CGroupV2):
     def __exit__(self, *exc):
         pass
 
-    def _init_root_cgroup(self):
+    def _init_root_cgroup(self) -> None:
         """
         Performs the required actions in order to initialise a Root V2 CGroup.
         In the case where systemd is active, there is a required need to create a leaf CGroup from the Root, where the PIDs
@@ -1124,11 +1079,11 @@ class _CGroupV2Root(_CGroupV2):
 
         if _is_systemd_online(target=self.target):
             # Create the leaf CGroup directory
-            group_name = "devlib-" + str(uuid4().hex)
-            full_path = self.target.path.join(self.group_path, group_name)
+            group_name: str = "devlib-" + str(uuid4().hex)
+            full_path: str = self.target.path.join(self.group_path, group_name)
             self._create_directory(full_path)
 
-            delegated_pids = _read_lines(
+            delegated_pids: List[str] = _read_lines(
                 target=self.target,
                 path="{path}/cgroup.procs".format(path=self.group_path),
             )
@@ -1155,19 +1110,14 @@ class _CGroupV1(_CGroupBase):
     A Class representing a CGroup folder within a CGroup V1 hierarchy.
 
     :param name: The name assigned to the CGroup. Used to identify the CGroup and define the CGroup folder name.
-    :type name: str
 
     :param parent_path: The path to the parent CGroup this CGroup is a child of.
-    :type parent_path: str
 
     :param active_controllers: A dictionary of controller name keys to dictionary value mappings,
         where the secondary dictionary contains a mapping between a specific 'attribute' of the aforementioned
         controller and a value for which that controller interface should be set to.
 
-    :type active_controllers: Dict[str, Dict[str, Union[str,int]]]
-
     :param target: Interface to target device.
-    :type target: Target
     """
 
     def __enter__(self):
@@ -1179,7 +1129,6 @@ class _CGroupV1(_CGroupBase):
         :raises TargetStableError: If an exception occurs within the :meth:`_init_cgroup` method call.
 
         :return: An object reference to itself.
-        :rtype: :class:`_CGroupV1`
         """
 
         self._create_directory(self.group_path)
@@ -1209,7 +1158,7 @@ class _CGroupV1(_CGroupBase):
                     controller=controller, attribute=attr, value=val, verify=True
                 )
 
-    def _add_thread(self, tid: int, threaded_domain):
+    def _add_thread(self, tid: int, threaded_domain: Union['ResponseTree', '_TreeBase']) -> None:
         """
         Adds the thread associated with ``tid`` to the CGroup.
         While thread level management suffers from no restrictions within a V1 hierarchy,
@@ -1220,17 +1169,15 @@ class _CGroupV1(_CGroupBase):
         granularity across the entire of the threaded subtree.
 
         :param tid: The TID of the thread to be added to the CGroup
-        :type tid: int
 
         :param threaded_domain: The :class:`ResponseTree` object representing the threaded domain
             of the threaded CGroup subtree. The process will be added to all the CGroups
             that the :class:`ResponseTree` represents.
-        :type threaded_domain: :class:`ResponseTree`
         """
 
-        pid_of_tid = self._get_pid_from_tid(tid=tid)
+        pid_of_tid: int = self._get_pid_from_tid(tid=tid)
 
-        for low_level in threaded_domain.low_levels.values():
+        for low_level in cast(ResponseTree, threaded_domain).low_levels.values():
             low_level._add_process(pid_of_tid)
 
         self._set_controller_attribute("", "tasks", tid)
@@ -1243,19 +1190,17 @@ class _CGroupV1Root(_CGroupV1):
     CGroup hierarchy.
 
     :param mount_point: The path to which the root of the CGroup V1 controller hierarchy is mounted on.
-    :type mount_point: str
 
     :param target: Interface to target device.
-    :type target: Target
     """
 
     @classmethod
     def _get_delegated_paths(
         cls,
-        controllers: Dict[str, Dict[str, Union[str, int]]],
+        controllers: ControllerDict,
         delegated_pid: int,
         target: LinuxTarget,
-    ):
+    ) -> Dict[str, str]:
         """
         Returns the relative sub-paths the delegated roots of the V1 hierarchies, via the parsing
         of the /proc/<PID>/cgroup file of the delegated PID.
@@ -1263,21 +1208,17 @@ class _CGroupV1Root(_CGroupV1):
         :param controllers: A dictionary of currently mounted CGroup controller name keys to dictionary value mappings,
              where the secondary dictionary contains a mapping between various CGroup controller configuration keys
              and their respectively obtained values for the respective CGroup controllers.
-        :type controllers: Dict[str, Dict[str, Union[str,int]]]
 
         :param delegated_pid: The Main PID of the transient service unit we request delegation for.
-        :type delegated_pid: int
 
         :param target: Interface to target device.
-        :type target: Target
 
         :raises TargetStableError: Occurs in the case where no V1 controllers have been delegated.
 
         :return: A dictionary mapping CGroup controllers to their respective delegated root paths.
-        :rtype: Dict[str, str]
         """
 
-        delegated_mount_paths = _read_lines(
+        delegated_mount_paths: List[str] = _read_lines(
             target=target, path="/proc/{pid}/cgroup".format(pid=delegated_pid)
         )
 
@@ -1292,18 +1233,18 @@ class _CGroupV1Root(_CGroupV1):
             r"\d+:(?P<controllers>.+):\/(?P<path_to_delegated_service_root>.*)"
         )
 
-        delegated_controllers = {}
+        delegated_controllers: Dict[str, str] = {}
 
         for mount_path in delegated_mount_paths:
             regex_match = REL_PATH_REGEX.match(mount_path)
             if regex_match:
-                con = regex_match.group("controllers")
-                path = regex_match.group("path_to_delegated_service_root")
+                con: str = regex_match.group("controllers")
+                path: str = regex_match.group("path_to_delegated_service_root")
                 # Multiple v1 controllers can be co-mounted on a single folder hierarchy.
-                co_mounted_controllers = con.strip().split(",")
+                co_mounted_controllers: List[str] = con.strip().split(",")
                 for controller in co_mounted_controllers:
                     try:
-                        configuration = controllers[controller]
+                        configuration: Dict[str, Union[str, int]] = controllers[controller]
                     except KeyError:
                         pass
                     else:
@@ -1323,28 +1264,24 @@ class _CGroupV1Root(_CGroupV1):
     def _systemd_offline_mount(
         cls,
         requested_controllers: Set[str],
-        all_controllers: Dict[str, Dict[str, Union[str, int]]],
+        all_controllers: ControllerDict,
         target: LinuxTarget,
     ):
         """
         Manually mounts the V1 split hierarchy on the target device. Occurs in the absence of systemd.
 
         :param requested_controllers: The set of controllers required to mount the requested hierarchy.
-        :type requested_controllers: Set[str]
 
         :param all_controllers: A Dictionary of currently mounted controller name keys to Dictionary value mappings,
             where the secondary dictionary contains a mapping between various CGroup controller configuration keys
             and their respectively obtained values for the respective CGroup controllers.
-        :type all_controllers: Dict[str, Dict[str, Union[str,int]]]
 
         :param target: Interface to target device.
-        :type target: Target
 
         :yield: A dictionary mapping CGroup controller names to their respective mount points.
-        :rtype: Dict[str,str]
         """
 
-        available_controllers = _CGroupV1Root._get_available_v1_controllers(
+        available_controllers: ControllerDict = _CGroupV1Root._get_available_v1_controllers(
             controllers=all_controllers
         )
         _validate_requested_hierarchy(
@@ -1358,10 +1295,13 @@ class _CGroupV1Root(_CGroupV1):
 
     @classmethod
     def _get_available_v1_controllers(
-        cls, controllers: Dict[str, Dict[str, Union[int, str]]]
-    ):
+        cls, controllers: ControllerDict
+    ) -> ControllerDict:
+        """
+        helper function to get the available v1 controllers
+        """
 
-        unused_controllers = {
+        unused_controllers: ControllerDict = {
             controller: configuration
             for controller, configuration in controllers.items()
             if configuration.get("version") is None
@@ -1378,28 +1318,24 @@ class _CGroupV1Root(_CGroupV1):
         cls,
         target: LinuxTarget,
         requested_controllers: Set[str],
-        all_controllers: Dict[str, Dict[str, str]],
-    ):
+        all_controllers: ControllerDict,
+    ) -> Generator[Dict[str, str], None, None]:
         """
         Sets up the required V1 hierarchy on the target device. Occurs in the presence of systemd.
 
         :param target: Interface to target device.
-        :type target: Target
 
         :param requested_controllers: The set of controllers required to mount the requested hierarchy.
-        :type requested_controllers: Set[str]
 
         :param all_controllers: A Dictionary of currently mounted controller name keys to dictionary value mappings,
             where the secondary dictionary contains a mapping between various CGroup controller configuration keys
             and their respectively obtained values for the respective CGroup controllers.
-        :type all_controllers: Dict[str, Dict[str, Union[str,int]]]
 
         :yield: A Dict[str, str] consisting of controller name keys mapped to their respective mount points.
-        :rtype: Dict[str, str]
         """
 
         with _request_delegation(target) as pid:
-            delegated_controllers = _CGroupV1Root._get_delegated_paths(
+            delegated_controllers: Dict[str, str] = _CGroupV1Root._get_delegated_paths(
                 controllers=all_controllers,
                 delegated_pid=pid,
                 target=target,
@@ -1413,7 +1349,7 @@ class _CGroupV1Root(_CGroupV1):
 
     @classmethod
     @contextmanager
-    def _mount_filesystem(cls, target: LinuxTarget, requested_controllers: Set[str]):
+    def _mount_filesystem(cls, target: LinuxTarget, requested_controllers: Set[str]) -> Generator[Dict[str, str], None, None]:
         """
         A context manager which Mounts/Sets-up a V1 split hierarchy on the target device, covering contexts where
         systemd is both present and absent. This context manager Mounts/Sets-up a split V1 hierarchy (if possible)
@@ -1421,26 +1357,23 @@ class _CGroupV1Root(_CGroupV1):
         the target device to the state before the mount/set-up occurred.
 
         :param target: Interface to target device.
-        :type target: Target
 
         :param requested_controllers: The set of controllers required to mount the requested hierarchy.
-        :type requested_controllers: Set[str]
 
         :yield: A dictionary mapping controller name to the paths where the controllers are mounted on, used to build the user requested V1 hierarchy.
-        :rtype: dict[str,str]
         """
 
-        systemd_online = _is_systemd_online(target=target)
-        controllers = _get_cgroup_controllers(target=target)
+        systemd_online: bool = _is_systemd_online(target=target)
+        controllers: ControllerDict = _get_cgroup_controllers(target=target)
 
         if systemd_online:
-            cm = _CGroupV1Root._systemd_online_setup(
+            cm: _GeneratorContextManager[Dict[str, str]] = _CGroupV1Root._systemd_online_setup(
                 target=target,
                 requested_controllers=requested_controllers,
                 all_controllers=controllers,
             )
-            with cm as controllers:
-                yield controllers
+            with cm as controllers_temp:
+                yield controllers_temp
 
         else:
             cm = _CGroupV1Root._systemd_offline_mount(
@@ -1448,8 +1381,8 @@ class _CGroupV1Root(_CGroupV1):
                 requested_controllers=requested_controllers,
                 all_controllers=controllers,
             )
-            with cm as controllers:
-                yield controllers
+            with cm as controllers_temp:
+                yield controllers_temp
 
     def __init__(self, mount_point: str, target: LinuxTarget):
 
@@ -1482,10 +1415,8 @@ class _TreeBase(ABC):
     The abstract base class that all tree class types' subclass.
 
     :param name: The name assigned to the tree node.
-    :type name: str
 
     :param is_threaded: Whether the node is threaded or not.
-    :type is_threaded: bool
     """
 
     def __init__(self, name: str, is_threaded: bool):
@@ -1495,14 +1426,14 @@ class _TreeBase(ABC):
 
         # Propagates Threaded Property to
         # sub-tree.
-        def make_threaded(grp):
+        def make_threaded(grp: '_TreeBase'):
             grp.is_threaded = True
             for child in grp._children_list:
                 make_threaded(child)
 
         # Propagates the Threaded domain
         # to sub-tree.
-        def set_domain(grp):
+        def set_domain(grp: '_TreeBase'):
             grp.threaded_domain = domain
             for child in grp._children_list:
                 set_domain(child)
@@ -1510,14 +1441,18 @@ class _TreeBase(ABC):
         if is_threaded:
             make_threaded(self)
         else:
-            domain = self
-            if any([child.is_threaded for child in self._children_list]):
-                for child in self._children_list:
-                    make_threaded(child)
-                    set_domain(child)
+            domain: '_TreeBase' = self
+            if self._children_list:
+                if any([child.is_threaded for child in self._children_list]):
+                    for child in self._children_list:
+                        make_threaded(child)
+                        set_domain(child)
 
     @property
-    def is_threaded_domain(self):
+    def is_threaded_domain(self) -> bool:
+        """
+        check if the is_threaded property is set in the domain
+        """
         return (
             True
             if any([child.is_threaded for child in self._children_list])
@@ -1527,7 +1462,10 @@ class _TreeBase(ABC):
 
     @property
     @memoized
-    def group_type(self):
+    def group_type(self) -> str:
+        """
+        get the type of the group
+        """
         if self.is_threaded_domain:
             return "threaded domain"
         elif self.is_threaded:
@@ -1540,10 +1478,8 @@ class _TreeBase(ABC):
         Returns a string representation of the tree hierarchy, used for visualization and debugging.
 
         :param level: The current depth of the tree, defaults to 0.
-        :type level: int, optional
 
         :return: String formatted output, displaying the hierarchical structure of the tree.
-        :rtype: str
         """
 
         TAB = "\t"
@@ -1563,7 +1499,7 @@ class _TreeBase(ABC):
 
     @property
     @abstractmethod
-    def _node_information(self):
+    def _node_information(self) -> str:
         """
         Returns a formatted string displaying the information the :class:`_TreeBase` object represents.
         """
@@ -1571,7 +1507,7 @@ class _TreeBase(ABC):
 
     @property
     @abstractmethod
-    def _children_list(self):
+    def _children_list(self) -> List['_TreeBase']:
         """
         Returns List[:class:`_TreeBase`].
         """
@@ -1585,36 +1521,32 @@ class RequestTree(_TreeBase):
     required by ensuring V2 semantic equivalence is maintained within the context of setting up a V1 hierarchy.
 
     :param name: Name assigned to the user defined :class:`RequestTree` object.
-    :type name: str
 
     :param children: A list of :class:`RequestTree` objects representing the children the object is
         a hierarchical parent to, defaults to ``None``.
-    :type children: List[:class:`RequestTree`], optional
 
     :param controllers: A Dictionary of controller name keys to dictionary value mappings,
         where the secondary dictionary contains a mapping between controller specific attributes and
         their respective to be assigned values, , defaults to ``None``.
-    :type controllers: Dict[str, Dict[str, Union[str,int]]], optional
 
     :param threaded: defines whether the object will represent a CGroup capable of managing threads, defaults to ``False``.
-    :type threaded: bool, optional
     """
 
     def __init__(
         self,
         name: str,
-        children: Union[list, None] = None,
-        controllers: Union[Dict[str, Dict[str, Any]], None] = None,
-        threaded=False,
+        children: Union[list['RequestTree'], None] = None,
+        controllers: Optional[ControllerDict] = None,
+        threaded: bool = False,
     ):
         self.children = children or []
         self.controllers = controllers or {}
         super().__init__(name=name, is_threaded=threaded)
 
     @property
-    def _node_information(self):
+    def _node_information(self) -> str:
         # Returns Requests Tree Node Information.
-        active_controllers = [
+        active_controllers: List[str] = [
             "({controller}) {config}".format(
                 controller=controller, config=configuration
             )
@@ -1627,8 +1559,10 @@ class RequestTree(_TreeBase):
 
     @property
     @memoized
-    def _all_controllers(self):
-        # Returns a set of all the controllers that are active in that subtree, including its own.
+    def _all_controllers(self) -> Set[str]:
+        """
+        Returns a set of all the controllers that are active in that subtree, including its own.
+        """
         return set(
             itertools.chain(
                 self.controllers.keys(),
@@ -1639,8 +1573,10 @@ class RequestTree(_TreeBase):
         )
 
     @property
-    def _subtree_controllers(self):
-        # Returns a set of all the controllers that are active in that subtree, excluding its own.
+    def _subtree_controllers(self) -> Set[str]:
+        """
+        Returns a set of all the controllers that are active in that subtree, excluding its own.
+        """
         return set(
             itertools.chain.from_iterable(
                 map(lambda child: child._all_controllers, self.children)
@@ -1648,11 +1584,11 @@ class RequestTree(_TreeBase):
         )
 
     @property
-    def _children_list(self):
+    def _children_list(self) -> List['_TreeBase']:
         return list(self.children)
 
     @contextmanager
-    def setup_hierarchy(self, version: int, target: LinuxTarget):
+    def setup_hierarchy(self, version: int, target: LinuxTarget) -> Generator['ResponseTree', None, None]:
         """
         A context manager which processes the user defined hierarchy and sets-up said hierarchy on the ``target`` device.
         Uses an internal exit stack to the handle the entering and safe exiting of the lower level
@@ -1662,10 +1598,8 @@ class RequestTree(_TreeBase):
         which the user will interact with and can inspect.
 
         :param version: The version of the CGroup hierarchy to be set up on the Target device.
-        :type version: int
 
         :param target: Interface to target device.
-        :type target: Target
 
         :raises TargetStableError: Occurs when the version argument is neither ``1`` or ``2``;
             the only two versions of CGroups currently available.
@@ -1674,15 +1608,16 @@ class RequestTree(_TreeBase):
         """
 
         with ExitStack() as exit_stack:
+            make_groups: Callable
             if version == 1:
                 # Returns a {controller_name: controller_mount_point} dict
-                controller_paths = exit_stack.enter_context(
+                controller_paths: Dict[str, str] = exit_stack.enter_context(
                     _CGroupV1Root._mount_filesystem(
                         target=target, requested_controllers=self._all_controllers
                     )
                 )
                 # Mounts the Roots Controller Parents.
-                root_parents = {
+                root_parents: Union[Dict[str, _CGroupV1], _CGroupV2] = {
                     controller: _CGroupV1Root(
                         mount_point=mount_path,
                         target=target,
@@ -1691,7 +1626,7 @@ class RequestTree(_TreeBase):
                     if controller in self._all_controllers
                 }
 
-                def make_groups(request: RequestTree, parents: Dict[str, _CGroupBase]):
+                def make_groups_v1(request: RequestTree, parents: Dict[str, _CGroupBase]):
                     """
                     Defines and instantiates the low-level :class:`_CGroupV1` objects as per defined by the
                     configuration of the ``request`` :class:`RequestTree`  object.
@@ -1700,10 +1635,8 @@ class RequestTree(_TreeBase):
                     created 'under' the suitable parent CGroup directory.
 
                     :param request: The :class:`RequestTree` object that'll define the required :class:`_CGroupV1` objects it represents.
-                    :type request: :class:`RequestTree`
 
                     :param parents: The Dictionary mapping that maps CGroup controller names to their leaf CGroup directory.
-                    :type parents: Dict[str, :class:`_CGroupBase`]
 
                     :return: A tuple ``(request_defined_cgroups, all_cgroups, parents)`` where the first element defines the
                         dictionary mapping the controller names to the :class:`_CGroupV1` objects created directly
@@ -1715,10 +1648,9 @@ class RequestTree(_TreeBase):
                         the low-level :class:`_CGroupV1` objects a particular :class:`RequestTree`
                         instance indirectly defines given its parents and the :class:`_CGroupV1` objects it passes to it children
                         as potential suitable parents are the same.
-                    :rtype: tuple(Dict[str,:class:`_CGroupV1`], Dict[str,:class:`_CGroupV1`], Dict[str,:class:`_CGroupV1`])
                     """
 
-                    request_defined_cgroups = {
+                    request_defined_cgroups: Dict[str, _CGroupV1] = {
                         controller: _CGroupV1(
                             name=request.name,
                             parent_path=parents[controller].group_path,
@@ -1730,8 +1662,10 @@ class RequestTree(_TreeBase):
 
                     # Parent dict updated to include the newly created leaf CGroups.
                     parents = {**parents, **request_defined_cgroups}
-                    all_cgroups = parents
+                    all_cgroups: Dict[str, _CGroupBase] = parents
                     return (request_defined_cgroups, all_cgroups, parents)
+
+                make_groups = make_groups_v1
 
             elif version == 2:
 
@@ -1752,7 +1686,7 @@ class RequestTree(_TreeBase):
                 # root CGroup setup defined within the __enter__ method.
                 exit_stack.enter_context(root_parents)
 
-                def make_groups(request: RequestTree, parent: _CGroupV2):
+                def make_groups_v2(request: RequestTree, parent: _CGroupV2):
                     """
                     Defines and instantiates the low-level :class:`_CGroupV2` object as per defined by the
                     configuration of the ``request`` :class:`RequestTree` object. The parents of said :class:`_CGroupV2` object
@@ -1760,10 +1694,8 @@ class RequestTree(_TreeBase):
                     :class:`_CGroupV2` object is created 'under' the suitable parent CGroup directory.
 
                     :param request: The :class:`RequestTree` object that'll define the required :class:`_CGroupV2` object.
-                    :type request: :class:`RequestTree`
 
                     :param parents: The CGroup that'll be the parent of the :class:`_CGroupV2` object being defined.
-                    :type parents: :class:`_CGroupV2`
 
                     :return: A tuple ``(controllers_to_cgroup, controllers_to_cgroup, parent)`` where the first and second elements
                         define a dictionary mapping of controller names as per defined by the :class:`RequestTree` object
@@ -1773,7 +1705,6 @@ class RequestTree(_TreeBase):
                         hierarchical parent of the subsequent V2 CGroups to be created. Duplication is required in this case since both the paths
                         the user defined V2 controllers are enabled at and the actual paths
                         of the low-level implementation are the same as per the structure of the unified V2 hierarchy.
-                    :rtype: tuple(Dict[str,:class:`_CGroupV2`],Dict[str,:class:`_CGroupV2`],:class:`_CGroupV2`)
                     """
 
                     request_group = _CGroupV2(
@@ -1787,12 +1718,14 @@ class RequestTree(_TreeBase):
 
                     # Creates a mapping between the enabled controllers within this CGroup to the low-level
                     # _CGroupV2 object
-                    controllers_to_cgroup = dict.fromkeys(
+                    controllers_to_cgroup: Dict[str, _CGroupV2] = dict.fromkeys(
                         request.controllers, request_group
                     )
                     # Creating 'parent' variable for readability’s sake.
                     parent = request_group
                     return (controllers_to_cgroup, controllers_to_cgroup, parent)
+
+                make_groups = make_groups_v2
 
             else:
                 raise TargetStableError(
@@ -1802,9 +1735,9 @@ class RequestTree(_TreeBase):
                 )
 
             # Create the Response Tree from the Request Tree.
-            response = self._create_response(root_parents, make_groups=make_groups)
+            response: 'ResponseTree' = self._create_response(root_parents, make_groups=make_groups)
             # Returns a list of all the Low-level _CGroupBase objects the response object represents in the right order
-            groups = response._all_nodes
+            groups: List[_CGroupBase] = response._all_nodes
             # Remove duplicates while preserving order.
             groups = sorted(set(groups), key=groups.index)
             # Enter the context for each object
@@ -1813,7 +1746,7 @@ class RequestTree(_TreeBase):
 
             yield response
 
-    def _create_response(self, low_level_parent, make_groups):
+    def _create_response(self, low_level_parent: Union[Dict[str, _CGroupV1], _CGroupV2], make_groups) -> 'ResponseTree':
         """
         Creates the :class:`ResponseTree` object tree, using the appropriately defined :meth:`make_group` callable (defined as a local function
         internally within :meth:`setup_hierarchy`) alongside the ``low_level_parent`` object to create the low-level CGroups a particular :class:`RequestTree` object represents.
@@ -1822,14 +1755,11 @@ class RequestTree(_TreeBase):
 
         :param low_level_parent: The parent/s to the CGroups to be created. In the context of setting up a V1 hierarchy, this will be a
             dictionary mapping controller names to :class:`_CGroupV1` objects; while in the case of V2, it'll be a solitary :class:`_CGroupV2` object.
-        :type low_level_parent: Dict[str,:class:`_CGroupV1`] | :class:`_CGroupV2`
 
         :param make_groups: The callable function definition used to create the low-level CGroup required. This callable is defined appropriately
             depending on the CGroup hierarchy version we require to set-up/mount.
-        :type make_groups: callable
 
         :return: The root of the :class:`ResponseTree` object tree.
-        :rtype: :class:`ResponseTree`
         """
 
         user_visible_low_level_groups, low_level_groups, low_level_parent = make_groups(
@@ -1862,24 +1792,19 @@ class ResponseTree(_TreeBase, collections.abc.Mapping):
     each :class:`ResponseTree` object represents and abstracts the low-level CGroups its respective :class:`RequestTree` object defines.
 
     :param name: Name assigned to the :class:`ResponseTree` object, mirrors the name defined to its respective :class:`RequestTree` Object.
-    :type name: str
 
     :param children: A dictionary that maps children names that this :class:`ResponseTree` object is a parent to
         and the respective :class:`ResponseTree` object the names represent.
-    :type children: dict[str,:class:`ResponseTree`]
 
     :param low_levels: A dictionary that maps CGroup controller names to the suitable low level CGroup this :class:`ResponseTree` abstracts.
-    :type low_levels: Dict[str, :class:`_CGroupBase`]
 
     :param user_low_levels: A dictionary that maps CGroup controller names to the suitable low level CGroup the
         :class:`RequestTree` object this class mirrors has specified. This is used within the context of a V1 user
         defined hierarchy in order to abstract the additional CGroups this class represents when trying to ensure V2 semantic
         equivalence. Done purely for cosmetic reasons.
-    :type user_low_levels: Dict[str, :class:`_CGroupBase`]
 
     :param is_threaded: Boolean flag representing whether or not this ResponseTree object represents a single threaded V2 CGroup
         or a collection of pseudo-threaded V1 CGroups.
-    :type is_threaded: bool
     """
 
     def __init__(
@@ -1896,7 +1821,7 @@ class ResponseTree(_TreeBase, collections.abc.Mapping):
         super().__init__(name=name, is_threaded=is_threaded)
 
     @property
-    def _node_information(self):
+    def _node_information(self) -> str:
         # Returns a formatted string, displaying the enabled user-defined controllers and their paths
         # (alongside the type of CGroup the controller resides in).
         return ", ".join(
@@ -1909,27 +1834,26 @@ class ResponseTree(_TreeBase, collections.abc.Mapping):
         )
 
     @property
-    def _children_list(self):
+    def _children_list(self) -> List['_TreeBase']:
         # Children Objects are the values in our self.children dict.
         return list(self.children.values())
 
     @property
-    def _all_nodes(self):
+    def _all_nodes(self) -> List[_CGroupBase]:
         return list(
             itertools.chain(
                 self.low_levels.values(),
                 itertools.chain.from_iterable(
-                    map(lambda child: child._all_nodes, self.children.values()),
+                    map(lambda child: cast(ResponseTree, child)._all_nodes, self.children.values()),
                 ),
             )
         )
 
-    def add_process(self, pid: int):
+    def add_process(self, pid: int) -> None:
         """
         Adds the process associated with ``pid`` to the low level CGroups this :class:`ResponseTree` object represents.
 
         :param pid: the PID of the process to be added to the low-level CGroups.
-        :type pid: int
 
         :raises TargetStableError: Occurs in the case where this object is a parent to non-threaded children.
             Ensures V2 hierarchy compatibility.
@@ -1945,12 +1869,11 @@ class ResponseTree(_TreeBase, collections.abc.Mapping):
                 )
             )
 
-    def add_thread(self, tid: int):
+    def add_thread(self, tid: int) -> None:
         """
         Adds the thread associated with the ``tid`` to the low level CGroups this :class:`ResponseTree` object represents.
 
         :param tid: the TID of the thread to be added to the low-level CGroups.
-        :type tid: int
 
         :raises TargetStableError: Occurs in the case where this object is not threaded.
             Ensures V2 hierarchy compatibility.

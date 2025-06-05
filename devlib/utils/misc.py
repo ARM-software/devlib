@@ -1,4 +1,4 @@
-#    Copyright 2013-2024 ARM Limited
+#    Copyright 2013-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ from itertools import groupby
 from operator import itemgetter
 from weakref import WeakSet
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError, MarkedYAMLError
+from devlib.utils.annotation_helpers import SubprocessCommand
 
 import ctypes
 import logging
@@ -39,28 +41,35 @@ import types
 import warnings
 import wrapt
 
-
 try:
     from contextlib import ExitStack
 except AttributeError:
-    from contextlib2 import ExitStack
+    from contextlib2 import ExitStack  # type: ignore
 
 from shlex import quote
-from past.builtins import basestring
 
 # pylint: disable=redefined-builtin
 from devlib.exception import HostError, TimeoutError
+from typing import (Union, List, Optional, Tuple, Set,
+                    Any, Callable, Dict, TYPE_CHECKING,
+                    Type, cast)
+from collections.abc import Generator
+from typing_extensions import Literal
+if TYPE_CHECKING:
+    from logging import Logger
+    from tarfile import TarFile, TarInfo
+    from devlib.target import Target
 
 
 # ABI --> architectures list
-ABI_MAP = {
+ABI_MAP: Dict[str, List[str]] = {
     'armeabi': ['armeabi', 'armv7', 'armv7l', 'armv7el', 'armv7lh', 'armeabi-v7a'],
     'arm64': ['arm64', 'armv8', 'arm64-v8a', 'aarch64'],
 }
 
 # Vendor ID --> CPU part ID --> CPU variant ID --> Core Name
 # None means variant is not used.
-CPU_PART_MAP = {
+CPU_PART_MAP: Dict[int, Dict[int, Dict[Optional[int], str]]] = {
     0x41: {  # ARM
         0x926: {None: 'ARM926'},
         0x946: {None: 'ARM946'},
@@ -127,16 +136,30 @@ CPU_PART_MAP = {
 }
 
 
-def get_cpu_name(implementer, part, variant):
+def get_cpu_name(implementer: int, part: int, variant: int) -> Optional[str]:
+    """
+    Retrieve the CPU name based on implementer, part, and variant IDs using the CPU_PART_MAP.
+
+    :param implementer: The vendor identifier.
+    :param part: The CPU part identifier.
+    :param variant: The CPU variant identifier.
+    :returns: The CPU name if found; otherwise, None.
+    """
     part_data = CPU_PART_MAP.get(implementer, {}).get(part, {})
     if None in part_data:  # variant does not determine core Name for this vendor
-        name = part_data[None]
+        name: Optional[str] = part_data[None]
     else:
         name = part_data.get(variant)
     return name
 
 
-def preexec_function():
+def preexec_function() -> None:
+    """
+    Set the process group ID for the current process so that a subprocess and all its children
+    can later be killed together. This function is Unix-specific.
+
+    :raises OSError: If setting the process group fails.
+    """
     # Change process group in case we have to kill the subprocess and all of
     # its children later.
     # TODO: this is Unix-specific; would be good to find an OS-agnostic way
@@ -144,22 +167,54 @@ def preexec_function():
     os.setpgrp()
 
 
-check_output_logger = logging.getLogger('check_output')
+def get_logger(name: str) -> logging.Logger:
+    return logging.getLogger(name)
 
-def get_subprocess(command, **kwargs):
+
+check_output_logger: 'Logger' = get_logger('check_output')
+
+
+def get_subprocess(command: SubprocessCommand, **kwargs) -> subprocess.Popen:
+    """
+    Launch a subprocess to run the specified command, overriding stdout to PIPE.
+    The process is set to a new process group via a preexec function.
+
+    :param command: The command to execute.
+    :param kwargs: Additional keyword arguments to pass to subprocess.Popen.
+    :raises ValueError: If 'stdout' is provided in kwargs.
+    :returns: A subprocess.Popen object running the command.
+    """
     if 'stdout' in kwargs:
         raise ValueError('stdout argument not allowed, it will be overridden.')
     return subprocess.Popen(command,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                stdin=subprocess.PIPE,
-                                preexec_fn=preexec_function,
-                                **kwargs)
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            stdin=subprocess.PIPE,
+                            preexec_fn=preexec_function,
+                            **kwargs)
 
 
-def check_subprocess_output(process, timeout=None, ignore=None, inputtext=None):
-    output = None
-    error = None
+def check_subprocess_output(
+        process: subprocess.Popen,
+        timeout: Optional[float] = None,
+        ignore: Optional[Union[int, List[int], Literal['all']]] = None,
+        inputtext: Union[str, bytes, None] = None) -> Tuple[str, str]:
+    """
+    Communicate with the given subprocess and return its decoded output and error streams.
+    This function handles timeouts and can ignore specified return codes.
+
+    :param process: The subprocess.Popen instance to interact with.
+    :param timeout: The maximum time in seconds to wait for the process to complete.
+    :param ignore: A return code (or list of codes) to ignore; use "all" to ignore all nonzero codes.
+    :param inputtext: Optional text or bytes to send to the process's stdin.
+    :returns: A tuple (output, error) with decoded strings.
+    :raises ValueError: If the ignore parameter is improperly formatted.
+    :raises TimeoutError: If the process does not complete before the timeout expires.
+    :raises subprocess.CalledProcessError: If the process exits with a nonzero code not in ignore.
+    """
+    output: Union[str, bytes] = ''
+    error: Union[str, bytes] = ''
+
     # pylint: disable=too-many-branches
     if ignore is None:
         ignore = []
@@ -170,39 +225,70 @@ def check_subprocess_output(process, timeout=None, ignore=None, inputtext=None):
         raise ValueError(message.format(ignore))
 
     with process:
+        timeout_expired: Optional[subprocess.TimeoutExpired] = None
         try:
             output, error = process.communicate(inputtext, timeout=timeout)
         except subprocess.TimeoutExpired as e:
             timeout_expired = e
-        else:
-            timeout_expired = None
 
         # Currently errors=replace is needed as 0x8c throws an error
-        output = output.decode(sys.stdout.encoding or 'utf-8', "replace") if output else ''
-        error = error.decode(sys.stderr.encoding or 'utf-8', "replace") if error else ''
+        output = cast(str, output.decode(sys.stdout.encoding or 'utf-8', "replace") if isinstance(output, bytes) else output)
+        error = cast(str, error.decode(sys.stderr.encoding or 'utf-8', "replace") if isinstance(error, bytes) else error)
 
         if timeout_expired:
             raise TimeoutError(process.args, output='\n'.join([output, error]))
 
-    retcode = process.returncode
+    retcode: int = process.returncode
     if retcode and ignore != 'all' and retcode not in ignore:
         raise subprocess.CalledProcessError(retcode, process.args, output, error)
 
     return output, error
 
 
-def check_output(command, timeout=None, ignore=None, inputtext=None, **kwargs):
-    """This is a version of subprocess.check_output that adds a timeout parameter to kill
-    the subprocess if it does not return within the specified time."""
+def check_output(command: SubprocessCommand, timeout: Optional[int] = None,
+                 ignore: Optional[Union[int, List[int], Literal['all']]] = None,
+                 inputtext: Union[str, bytes, None] = None, **kwargs) -> Tuple[str, str]:
+    """
+    This is a version of subprocess.check_output that adds a timeout parameter to kill
+    the subprocess if it does not return within the specified time.
+
+    :param command: The command to execute.
+    :param timeout: Time in seconds to wait for the command to complete.
+    :param ignore: A return code or list of return codes to ignore, or "all" to ignore all.
+    :param inputtext: Optional text or bytes to send to the command's stdin.
+    :param kwargs: Additional keyword arguments for subprocess.Popen.
+    :returns: A tuple (stdout, stderr) of the command's decoded output.
+    :raises TimeoutError: If the command does not complete in time.
+    :raises subprocess.CalledProcessError: If the command fails and its return code is not ignored.
+    """
     process = get_subprocess(command, **kwargs)
     return check_subprocess_output(process, timeout=timeout, ignore=ignore, inputtext=inputtext)
 
 
-def walk_modules(path):
+class ExtendedHostError(HostError):
+    """
+    Exception class that extends HostError with additional attributes.
+
+    :param message: The error message.
+    :param module: The name of the module where the error originated.
+    :param exc_info: Exception information from sys.exc_info().
+    :param orig_exc: The original exception that was caught.
+    """
+    def __init__(self, message: str, module: Optional[str] = None,
+                 exc_info: Any = None, orig_exc: Optional[Exception] = None):
+        super().__init__(message)
+        self.module = module
+        self.exc_info = exc_info
+        self.orig_exc = orig_exc
+
+
+def walk_modules(path: str) -> List[types.ModuleType]:
     """
     Given package name, return a list of all modules (including submodules, etc)
     in that package.
 
+    :param path: The package name to walk (e.g., 'mypackage').
+    :returns: A list of module objects.
     :raises HostError: if an exception is raised while trying to import one of the
                        modules under ``path``. The exception will have addtional
                        attributes set: ``module`` will be set to the qualified name
@@ -211,39 +297,50 @@ def walk_modules(path):
 
     """
 
-    def __try_import(path):
+    def __try_import(path: str) -> types.ModuleType:
         try:
             return __import__(path, {}, {}, [''])
         except Exception as e:
             he = HostError('Could not load {}: {}'.format(path, str(e)))
-            he.module = path
-            he.exc_info = sys.exc_info()
-            he.orig_exc = e
+            cast(ExtendedHostError, he).module = path
+            cast(ExtendedHostError, he).exc_info = sys.exc_info()
+            cast(ExtendedHostError, he).orig_exc = e
             raise he
 
-    root_mod = __try_import(path)
-    mods = [root_mod]
+    root_mod: types.ModuleType = __try_import(path)
+    mods: List[types.ModuleType] = [root_mod]
     if not hasattr(root_mod, '__path__'):
         # root is a module not a package -- nothing to walk
         return mods
     for _, name, ispkg in pkgutil.iter_modules(root_mod.__path__):
-        submod_path = '.'.join([path, name])
+        submod_path: str = '.'.join([path, name])
         if ispkg:
             mods.extend(walk_modules(submod_path))
         else:
-            submod = __try_import(submod_path)
+            submod: types.ModuleType = __try_import(submod_path)
             mods.append(submod)
     return mods
 
-def redirect_streams(stdout, stderr, command):
+
+def redirect_streams(stdout: int, stderr: int,
+                     command: SubprocessCommand) -> Tuple[int, int, SubprocessCommand]:
     """
-    Update a command to redirect a given stream to /dev/null if it's
-    ``subprocess.DEVNULL``.
+    Adjust a command string to redirect output streams to specific targets.
+    If a stream is set to subprocess.DEVNULL, it replaces it with a redirect
+    to /dev/null; for subprocess.STDOUT, it merges stderr into stdout.
+
+    :param stdout: The desired stdout value.
+    :param stderr: The desired stderr value.
+    :param command: The original command to run.
 
     :return: A tuple (stdout, stderr, command) with stream set to ``subprocess.PIPE``
         if the `stream` parameter was set to ``subprocess.DEVNULL``.
     """
-    def redirect(stream, redirection):
+
+    def redirect(stream: int, redirection: str) -> Tuple[int, str]:
+        """
+        redirect output and error streams
+        """
         if stream == subprocess.DEVNULL:
             suffix = '{}/dev/null'.format(redirection)
         elif stream == subprocess.STDOUT:
@@ -259,47 +356,76 @@ def redirect_streams(stdout, stderr, command):
     stdout, suffix1 = redirect(stdout, '>')
     stderr, suffix2 = redirect(stderr, '2>')
 
-    command = 'sh -c {} {} {}'.format(quote(command), suffix1, suffix2)
+    command = 'sh -c {} {} {}'.format(quote(cast(str, command)), suffix1, suffix2)
     return (stdout, stderr, command)
 
-def ensure_directory_exists(dirpath):
+
+def ensure_directory_exists(dirpath: str) -> str:
     """A filter for directory paths to ensure they exist."""
     if not os.path.isdir(dirpath):
         os.makedirs(dirpath)
     return dirpath
 
 
-def ensure_file_directory_exists(filepath):
+def ensure_file_directory_exists(filepath: str) -> str:
     """
     A filter for file paths to ensure the directory of the
     file exists and the file can be created there. The file
     itself is *not* going to be created if it doesn't already
     exist.
 
+    :param dirpath: The directory path to check.
+    :returns: The directory path.
+    :raises OSError: If the directory cannot be created
     """
     ensure_directory_exists(os.path.dirname(filepath))
     return filepath
 
 
-def merge_dicts(*args, **kwargs):
+def merge_dicts(*args, **kwargs) -> Dict:
+    """
+    Merge multiple dictionaries together.
+
+    :param args: Two or more dictionaries to merge.
+    :param kwargs: Additional keyword arguments to pass to the merging function.
+    :returns: A new dictionary containing the merged keys and values.
+    :raises ValueError: If fewer than two dictionaries are provided.
+    """
     if not len(args) >= 2:
         raise ValueError('Must specify at least two dicts to merge.')
-    func = partial(_merge_two_dicts, **kwargs)
+    func: partial[Dict] = partial(_merge_two_dicts, **kwargs)
     return reduce(func, args)
 
 
-def _merge_two_dicts(base, other, list_duplicates='all', match_types=False,  # pylint: disable=R0912,R0914
-                     dict_type=dict, should_normalize=True, should_merge_lists=True):
-    """Merge dicts normalizing their keys."""
+def _merge_two_dicts(base: Dict, other: Dict, list_duplicates: str = 'all',
+                     match_types: bool = False,  # pylint: disable=R0912,R0914
+                     dict_type: Type[Dict] = dict, should_normalize: bool = True,
+                     should_merge_lists: bool = True) -> Dict:
+    """
+    Merge two dictionaries recursively, normalizing their keys. The merging behavior
+    for lists and duplicate keys can be controlled via parameters.
+
+    :param base: The first dictionary.
+    :param other: The second dictionary to merge into the first.
+    :param list_duplicates: Strategy for handling duplicate list entries ("all", "first", or "last").
+    :param match_types: If True, enforce that overlapping keys have the same type.
+    :param dict_type: The dictionary type to use for constructing merged dictionaries.
+    :param should_normalize: If True, normalize keys/values during merge.
+    :param should_merge_lists: If True, merge lists; otherwise, override base list.
+    :returns: A merged dictionary.
+    :raises ValueError: If there is a type mismatch for a key when match_types is True.
+    :raises AssertionError: If an unexpected merge key is encountered.
+    """
     merged = dict_type()
     base_keys = list(base.keys())
     other_keys = list(other.keys())
-    norm = normalize if should_normalize else lambda x, y: x
+    # FIXME - annotate the lambda. type checker is not able to deduce its type
+    norm: Callable = normalize if should_normalize else lambda x, y: x       # type:ignore
 
-    base_only = []
-    other_only = []
-    both = []
-    union = []
+    base_only: List = []
+    other_only: List = []
+    both: List = []
+    union: List = []
     for k in base_keys:
         if k in other_keys:
             both.append(k)
@@ -345,50 +471,70 @@ def _merge_two_dicts(base, other, list_duplicates='all', match_types=False,  # p
     return merged
 
 
-def merge_lists(*args, **kwargs):
+def merge_lists(*args, **kwargs) -> List:
+    """
+    Merge multiple lists together.
+
+    :param args: Two or more lists to merge.
+    :param kwargs: Additional keyword arguments to pass to the merging function.
+    :returns: A merged list containing the combined items.
+    :raises ValueError: If fewer than two lists are provided.
+    """
     if not len(args) >= 2:
         raise ValueError('Must specify at least two lists to merge.')
     func = partial(_merge_two_lists, **kwargs)
     return reduce(func, args)
 
 
-def _merge_two_lists(base, other, duplicates='all', dict_type=dict):  # pylint: disable=R0912
+def _merge_two_lists(base: List, other: List, duplicates: str = 'all',
+                     dict_type: Type[Dict] = dict) -> List:  # pylint: disable=R0912
     """
     Merge lists, normalizing their entries.
 
-    parameters:
+    :param base: The base list.
+    :param other: The list to merge into base.
+    :param duplicates: Indicates the strategy of handling entries that appear
+                    in both lists. ``all`` will keep occurrences from both
+                    lists; ``first`` will only keep occurrences from
+                    ``base``; ``last`` will only keep occurrences from
+                    ``other``;
 
-        :base, other: the two lists to be merged. ``other`` will be merged on
-                      top of base.
-        :duplicates: Indicates the strategy of handling entries that appear
-                     in both lists. ``all`` will keep occurrences from both
-                     lists; ``first`` will only keep occurrences from
-                     ``base``; ``last`` will only keep occurrences from
-                     ``other``;
-
-                     .. note:: duplicate entries that appear in the *same* list
+    .. note:: duplicate entries that appear in the *same* list
                                will never be removed.
-
+    :param dict_type: The dictionary type to use for normalization if needed.
+    :returns: A merged list with duplicate handling applied.
+    :raises ValueError: If an unexpected value is provided for duplicates.
     """
     if not isiterable(base):
         base = [base]
     if not isiterable(other):
         other = [other]
     if duplicates == 'all':
-        merged_list = []
-        for v in normalize(base, dict_type) + normalize(other, dict_type):
+        merged_list: List = []
+        combined: List = []
+        normalized_base = normalize(base, dict_type)
+        normalized_other = normalize(other, dict_type)
+        if isinstance(normalized_base, (list, tuple)) and isinstance(normalized_other, (list, tuple)):
+            combined = list(normalized_base) + list(normalized_other)
+        elif isinstance(normalized_base, dict) and isinstance(normalized_other, dict):
+            combined = [normalized_base, normalized_other]
+        elif isinstance(normalized_base, set) and isinstance(normalized_other, set):
+            combined = list(normalized_base.union(normalized_other))
+        else:
+            combined = list(normalized_base) + list(normalized_other)
+        for v in combined:
             if not _check_remove_item(merged_list, v):
                 merged_list.append(v)
         return merged_list
     elif duplicates == 'first':
         base_norm = normalize(base, dict_type)
-        merged_list = normalize(base, dict_type)
+        merged_list = cast(List, normalize(base, dict_type))
         for v in base_norm:
             _check_remove_item(merged_list, v)
         for v in normalize(other, dict_type):
             if not _check_remove_item(merged_list, v):
                 if v not in base_norm:
-                    merged_list.append(v)  # pylint: disable=no-member
+                    cast(List, merged_list).append(v)  # pylint: disable=no-member
         return merged_list
     elif duplicates == 'last':
         other_norm = normalize(other, dict_type)
@@ -406,11 +552,16 @@ def _merge_two_lists(base, other, duplicates='all', dict_type=dict):  # pylint: 
                          'Must be in {"all", "first", "last"}.')
 
 
-def _check_remove_item(the_list, item):
-    """Helper function for merge_lists that implements checking wether an items
-    should be removed from the list and doing so if needed. Returns ``True`` if
-    the item has been removed and ``False`` otherwise."""
-    if not isinstance(item, basestring):
+def _check_remove_item(the_list: List, item: Any) -> bool:
+    """
+    Check whether an item should be removed from a list based on certain criteria.
+    If the item is a string starting with '~', its unprefixed version is removed from the list.
+
+    :param the_list: The list in which to check for the item.
+    :param item: The item to check.
+    :returns: True if the item was removed; False otherwise.
+    """
+    if not isinstance(item, str):
         return False
     if not item.startswith('~'):
         return False
@@ -420,9 +571,16 @@ def _check_remove_item(the_list, item):
     return True
 
 
-def normalize(value, dict_type=dict):
-    """Normalize values. Recursively normalizes dict keys to be lower case,
-    no surrounding whitespace, underscore-delimited strings."""
+def normalize(value: Union[Dict, List, Tuple, Set],
+              dict_type: Type[Dict] = dict) -> Union[Dict, List, Tuple, Set]:
+    """
+    Recursively normalize values by converting dictionary keys to lower-case,
+    stripping whitespace, and replacing spaces with underscores.
+
+    :param value: A dict, list, tuple, or set to normalize.
+    :param dict_type: The dictionary type to use for normalized dictionaries.
+    :returns: A normalized version of the input value.
+    """
     if isinstance(value, dict):
         normalized = dict_type()
         for k, v in value.items():
@@ -437,12 +595,25 @@ def normalize(value, dict_type=dict):
         return value
 
 
-def convert_new_lines(text):
-    """ Convert new lines to a common format.  """
+def convert_new_lines(text: str) -> str:
+    """
+    Convert different newline conventions to a single '\n' format.
+
+    :param text: The input text.
+    :returns: The text with unified newline characters.
+    """
     return text.replace('\r\n', '\n').replace('\r', '\n')
 
-def sanitize_cmd_template(cmd):
-    msg = (
+
+def sanitize_cmd_template(cmd: str) -> str:
+    """
+    Replace quoted placeholders with unquoted ones in a command template,
+    warning the user if quoted placeholders are detected.
+
+    :param cmd: The command template string.
+    :returns: The sanitized command template.
+    """
+    msg: str = (
         '''Quoted placeholder should not be used, as it will result in quoting the text twice. {} should be used instead of '{}' or "{}" in the template: '''
     )
     for unwanted in ('"{}"', "'{}'"):
@@ -452,51 +623,69 @@ def sanitize_cmd_template(cmd):
 
     return cmd
 
-def escape_quotes(text):
-    """
-    Escape quotes, and escaped quotes, in the specified text.
 
-    .. note:: :func:`shlex.quote` should be favored where possible.
+def escape_quotes(text: str) -> str:
+    """
+    Escape quotes and escaped quotes in the given text.
+
+    .. note:: It is recommended to use shlex.quote when possible.
+
+    :param text: The text to escape.
+    :returns: The text with quotes escaped.
     """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\'', '\\\'').replace('\"', '\\\"')
 
 
-def escape_single_quotes(text):
+def escape_single_quotes(text: str) -> str:
     """
-    Escape single quotes, and escaped single quotes, in the specified text.
+    Escape single quotes in the provided text.
 
-    .. note:: :func:`shlex.quote` should be favored where possible.
+    .. note:: Prefer using shlex.quote when possible.
+
+    :param text: The text to process.
+    :returns: The text with single quotes escaped.
     """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\'', '\'\\\'\'')
 
 
-def escape_double_quotes(text):
+def escape_double_quotes(text: str) -> str:
     """
-    Escape double quotes, and escaped double quotes, in the specified text.
+    Escape double quotes in the given text.
 
-    .. note:: :func:`shlex.quote` should be favored where possible.
+    .. note:: Prefer using shlex.quote when possible.
+
+    :param text: The input text.
+    :returns: The text with double quotes escaped.
     """
     return re.sub(r'\\("|\')', r'\\\\\1', text).replace('\"', '\\\"')
 
 
-def escape_spaces(text):
+def escape_spaces(text: str) -> str:
     """
-    Escape spaces in the specified text
+    Escape spaces in the provided text.
 
-    .. note:: :func:`shlex.quote` should be favored where possible.
+    .. note:: Prefer using shlex.quote when possible.
+
+    :param text: The text to process.
+    :returns: The text with spaces escaped.
     """
     return text.replace(' ', '\\ ')
 
 
-def getch(count=1):
-    """Read ``count`` characters from standard input."""
+def getch(count: int = 1) -> str:
+    """
+    Read a specified number of characters from standard input.
+
+    :param count: The number of characters to read.
+    :returns: A string of characters read from stdin.
+    """
     if os.name == 'nt':
         import msvcrt  # pylint: disable=F0401
-        return ''.join([msvcrt.getch() for _ in range(count)])
+        return ''.join([msvcrt.getch() for _ in range(count)])  # type:ignore
     else:  # assume Unix
         import tty  # NOQA
         import termios  # NOQA
-        fd = sys.stdin.fileno()
+        fd: int = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
             tty.setraw(sys.stdin.fileno())
@@ -506,45 +695,70 @@ def getch(count=1):
         return ch
 
 
-def isiterable(obj):
-    """Returns ``True`` if the specified object is iterable and
-    *is not a string type*, ``False`` otherwise."""
-    return hasattr(obj, '__iter__') and not isinstance(obj, basestring)
+def isiterable(obj: Any) -> bool:
+    """
+    Determine if the provided object is iterable, excluding strings.
+
+    :param obj: The object to test.
+    :returns: True if the object is iterable and is not a string; otherwise, False.
+    """
+    return hasattr(obj, '__iter__') and not isinstance(obj, str)
 
 
-def as_relative(path):
-    """Convert path to relative by stripping away the leading '/' on UNIX or
-    the equivant on other platforms."""
+def as_relative(path: str) -> str:
+    """
+    Convert an absolute path to a relative path by removing leading separators.
+
+    :param path: The absolute path.
+    :returns: A relative path.
+    """
     path = os.path.splitdrive(path)[1]
     return path.lstrip(os.sep)
 
 
-def commonprefix(file_list, sep=os.sep):
+def commonprefix(file_list: List[str], sep: str = os.sep) -> str:
     """
-    Find the lowest common base folder of a passed list of files.
+    Determine the lowest common base folder among a list of file paths.
+
+    :param file_list: A list of file paths.
+    :param sep: The path separator to use.
+    :returns: The common prefix path.
     """
-    common_path = os.path.commonprefix(file_list)
-    cp_split = common_path.split(sep)
-    other_split = file_list[0].split(sep)
-    last = len(cp_split) - 1
+    common_path: str = os.path.commonprefix(file_list)
+    cp_split: List[str] = common_path.split(sep)
+    other_split: List[str] = file_list[0].split(sep)
+    last: int = len(cp_split) - 1
     if cp_split[last] != other_split[last]:
         cp_split = cp_split[:-1]
     return sep.join(cp_split)
 
 
-def get_cpu_mask(cores):
-    """Return a string with the hex for the cpu mask for the specified core numbers."""
+def get_cpu_mask(cores: List[int]) -> str:
+    """
+    Compute a hexadecimal CPU mask for the specified core indices.
+
+    :param cores: A list of core numbers.
+    :returns: A hexadecimal string representing the CPU mask.
+    """
     mask = 0
     for i in cores:
         mask |= 1 << i
     return '0x{0:x}'.format(mask)
 
 
-def which(name):
-    """Platform-independent version of UNIX which utility."""
+def which(name: str) -> Optional[str]:
+    """
+    Find the full path to an executable by searching the system PATH.
+    Provides a platform-independent implementation of the UNIX 'which' utility.
+
+    :param name: The name of the executable to find.
+    :returns: The full path to the executable if found, otherwise None.
+    """
     if os.name == 'nt':
-        paths = os.getenv('PATH').split(os.pathsep)
-        exts = os.getenv('PATHEXT').split(os.pathsep)
+        path_env = os.getenv('PATH')
+        pathext_env = os.getenv('PATHEXT')
+        paths: List[str] = path_env.split(os.pathsep) if path_env else []
+        exts: List[str] = pathext_env.split(os.pathsep) if pathext_env else []
         for path in paths:
             testpath = os.path.join(path, name)
             if os.path.isfile(testpath):
@@ -564,11 +778,18 @@ def which(name):
 # This matches most ANSI escape sequences, not just colors
 _bash_color_regex = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
-def strip_bash_colors(text):
+
+def strip_bash_colors(text: str) -> str:
+    """
+    Remove ANSI escape sequences (commonly used for terminal colors) from the given text.
+
+    :param text: The input string potentially containing ANSI escape sequences.
+    :returns: The input text with all ANSI escape sequences removed.
+    """
     return _bash_color_regex.sub('', text)
 
 
-def get_random_string(length):
+def get_random_string(length: int) -> str:
     """Returns a random ASCII string of the specified length)."""
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
@@ -581,7 +802,7 @@ class LoadSyntaxError(Exception):
             return self.args[0]
         return str(self)
 
-    def __init__(self, message, filepath, lineno):
+    def __init__(self, message: str, filepath: str, lineno: Optional[int]):
         super(LoadSyntaxError, self).__init__(message)
         self.filepath = filepath
         self.lineno = lineno
@@ -591,36 +812,34 @@ class LoadSyntaxError(Exception):
         return message.format(self.filepath, self.lineno, self.message)
 
 
-def load_struct_from_yaml(filepath):
+def load_struct_from_yaml(filepath: str) -> Dict:
     """
     Parses a config structure from a YAML file.
     The structure should be composed of basic Python types.
 
     :param filepath: Input file which contains YAML data.
-    :type filepath: str
 
     :raises LoadSyntaxError: if there is a syntax error in YAML data.
 
     :return: A dictionary which contains parsed YAML data
-    :rtype: Dict
     """
 
     try:
         yaml = YAML(typ='safe', pure=True)
         with open(filepath, 'r', encoding='utf-8') as file_handler:
             return yaml.load(file_handler)
-    except yaml.YAMLError as ex:
-        message = ex.message if hasattr(ex, 'message') else ''
-        lineno = ex.problem_mark.line if hasattr(ex, 'problem_mark') else None
+    except YAMLError as ex:
+        message = str(ex)
+        lineno = cast(MarkedYAMLError, ex).problem_mark.line if hasattr(ex, 'problem_mark') else None
         raise LoadSyntaxError(message, filepath=filepath, lineno=lineno) from ex
 
 
-RAND_MOD_NAME_LEN = 30
-BAD_CHARS = string.punctuation + string.whitespace
-TRANS_TABLE = str.maketrans(BAD_CHARS, '_' * len(BAD_CHARS))
+RAND_MOD_NAME_LEN: int = 30
+BAD_CHARS: str = string.punctuation + string.whitespace
+TRANS_TABLE: Dict[int, int] = str.maketrans(BAD_CHARS, '_' * len(BAD_CHARS))
 
 
-def to_identifier(text):
+def to_identifier(text: str) -> str:
     """Converts text to a valid Python identifier by replacing all
     whitespace and punctuation and adding a prefix if starting with a digit"""
     if text[:1].isdigit():
@@ -628,7 +847,7 @@ def to_identifier(text):
     return re.sub('_+', '_', str(text).translate(TRANS_TABLE))
 
 
-def unique(alist):
+def unique(alist: List) -> List:
     """
     Returns a list containing only unique elements from the input list (but preserves
     order, unlike sets).
@@ -641,9 +860,9 @@ def unique(alist):
     return result
 
 
-def ranges_to_list(ranges_string):
+def ranges_to_list(ranges_string: str) -> List[int]:
     """Converts a sysfs-style ranges string, e.g. ``"0,2-4"``, into a list ,e.g ``[0,2,3,4]``"""
-    values = []
+    values: List[int] = []
     for rg in ranges_string.split(','):
         if '-' in rg:
             first, last = list(map(int, rg.split('-')))
@@ -653,13 +872,13 @@ def ranges_to_list(ranges_string):
     return values
 
 
-def list_to_ranges(values):
+def list_to_ranges(values: List) -> str:
     """Converts a list, e.g ``[0,2,3,4]``, into a sysfs-style ranges string, e.g. ``"0,2-4"``"""
     values = sorted(values)
     range_groups = []
     for _, g in groupby(enumerate(values), lambda i_x: i_x[0] - i_x[1]):
         range_groups.append(list(map(itemgetter(1), g)))
-    range_strings = []
+    range_strings: List[str] = []
     for group in range_groups:
         if len(group) == 1:
             range_strings.append(str(group[0]))
@@ -668,7 +887,7 @@ def list_to_ranges(values):
     return ','.join(range_strings)
 
 
-def list_to_mask(values, base=0x0):
+def list_to_mask(values: List[int], base: int = 0x0) -> int:
     """Converts the specified list of integer values into
     a bit mask for those values. Optinally, the list can be
     applied to an existing mask."""
@@ -677,7 +896,7 @@ def list_to_mask(values, base=0x0):
     return base
 
 
-def mask_to_list(mask):
+def mask_to_list(mask: int) -> List[int]:
     """Converts the specfied integer bitmask into a list of
     indexes of bits that are set in the mask."""
     size = len(bin(mask)) - 2  # because of "0b"
@@ -685,27 +904,32 @@ def mask_to_list(mask):
             if mask & (1 << size - i - 1)]
 
 
-__memo_cache = {}
+__memo_cache: Dict[str, Any] = {}
 
 
-def reset_memo_cache():
+def reset_memo_cache() -> None:
+    """
+    Clear the global memoization cache used for caching function results.
+
+    :returns: None
+    """
     __memo_cache.clear()
 
 
-def __get_memo_id(obj):
+def __get_memo_id(obj: object) -> str:
     """
     An object's id() may be re-used after an object is freed, so it's not
     sufficiently unique to identify params for the memo cache (two different
     params may end up with the same id). this attempts to generate a more unique
     ID string.
     """
-    obj_id = id(obj)
+    obj_id: int = id(obj)
     try:
         return '{}/{}'.format(obj_id, hash(obj))
     except TypeError:  # obj is not hashable
         obj_pyobj = ctypes.cast(obj_id, ctypes.py_object)
         # TODO: Note: there is still a possibility of a clash here. If Two
-        # different objects get assigned the same ID, an are large and are
+        # different objects get assigned the same ID, and are large and are
         # identical in the first thirty two bytes. This shouldn't be much of an
         # issue in the current application of memoizing Target calls, as it's very
         # unlikely that a target will get passed large params; but may cause
@@ -715,24 +939,33 @@ def __get_memo_id(obj):
         # undesirable impact on performance.
         num_bytes = min(ctypes.sizeof(obj_pyobj), 32)
         obj_bytes = ctypes.string_at(ctypes.addressof(obj_pyobj), num_bytes)
-        return '{}/{}'.format(obj_id, obj_bytes)
+        return '{}/{}'.format(obj_id, cast(str, obj_bytes))
 
 
-@wrapt.decorator
-def memoized(wrapped, instance, args, kwargs):  # pylint: disable=unused-argument
+def memoized_decor(wrapped: Callable[..., Any], instance: Optional[Any],
+                   args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any:  # pylint: disable=unused-argument
     """
-    A decorator for memoizing functions and methods.
+    Decorator helper function for memoizing the results of a function call.
+    The result is cached based on a key derived from the function's arguments.
+    Note that this method does not account for changes to mutable arguments.
 
     .. warning:: this may not detect changes to mutable types. As long as the
                  memoized function was used with an object as an argument
                  before, the cached result will be returned, even if the
                  structure of the object (e.g. a list) has changed in the mean time.
 
-    """
-    func_id = repr(wrapped)
+    :param wrapped: The function to be memoized.
+    :param instance: The instance on which the function is called (if it is a method), or None.
+    :param args: Tuple of positional arguments passed to the function.
+    :param kwargs: Dictionary of keyword arguments passed to the function.
+    :returns: The cached result if available; otherwise, the result from calling the function.
+    :raises Exception: Any exception raised during the execution of the wrapped function is propagated.
 
-    def memoize_wrapper(*args, **kwargs):
-        id_string = func_id + ','.join([__get_memo_id(a) for a in  args])
+    """
+    func_id: str = repr(wrapped)
+
+    def memoize_wrapper(*args, **kwargs) -> Dict[str, Any]:
+        id_string: str = func_id + ','.join([__get_memo_id(a) for a in args])
         id_string += ','.join('{}={}'.format(k, __get_memo_id(v))
                               for k, v in kwargs.items())
         if id_string not in __memo_cache:
@@ -741,8 +974,13 @@ def memoized(wrapped, instance, args, kwargs):  # pylint: disable=unused-argumen
 
     return memoize_wrapper(*args, **kwargs)
 
+
+# create memoized decorator from memoized_decor function
+memoized = wrapt.decorator(memoized_decor)
+
+
 @contextmanager
-def batch_contextmanager(f, kwargs_list):
+def batch_contextmanager(f: Callable, kwargs_list: List[Dict[str, Any]]) -> Generator:
     """
     Return a context manager that will call the ``f`` callable with the keyword
     arguments dict in the given list, in one go.
@@ -750,7 +988,6 @@ def batch_contextmanager(f, kwargs_list):
     :param f: Callable expected to return a context manager.
 
     :param kwargs_list: list of kwargs dictionaries to be used to call ``f``.
-    :type kwargs_list: list(dict)
     """
     with ExitStack() as stack:
         for kwargs in kwargs_list:
@@ -768,9 +1005,9 @@ class nullcontext:
 
     :param enter_result: Object that will be bound to the target of the with
         statement, or `None` if nothing is specified.
-    :type enter_result: object
     """
-    def __init__(self, enter_result=None):
+
+    def __init__(self, enter_result: Any = None):
         self.enter_result = enter_result
 
     def __enter__(self):
@@ -797,21 +1034,43 @@ class tls_property:
     to that object, like :meth:`_BoundTLSProperty.get_all_values`.
 
     Values can be set and deleted as well, which will be a thread-local set.
+
+    :param factory: A callable used to generate the property value.
     """
 
     @property
-    def name(self):
+    def name(self) -> str:
+        """
+        Retrieve the name of the factory function used for this property.
+
+        :returns: The name of the factory function.
+        """
         return self.factory.__name__
 
-    def __init__(self, factory):
+    def __init__(self, factory: Callable):
         self.factory = factory
         # Lock accesses to shared WeakKeyDictionary and WeakSet
         self.lock = threading.RLock()
 
-    def __get__(self, instance, owner=None):
+    def __get__(self, instance: 'Target', owner: Optional[Type['Target']] = None) -> '_BoundTLSProperty':
+        """
+        Retrieve the thread-local property proxy for the given instance.
+
+        :param instance: The target instance.
+        :param owner: The class owning the property (optional).
+        :returns: A bound TLS property proxy.
+        """
         return _BoundTLSProperty(self, instance, owner)
 
-    def _get_value(self, instance, owner):
+    def _get_value(self, instance: 'Target', owner: Optional[Type['Target']]) -> Any:
+        """
+        Retrieve or compute the thread-local value for the given instance. If the value
+        does not exist, it is created using the factory callable.
+
+        :param instance: The target instance.
+        :param owner: The class owning the property (optional).
+        :returns: The thread-local value.
+        """
         tls, values = self._get_tls(instance)
         try:
             return tls.value
@@ -826,20 +1085,38 @@ class tls_property:
                 values.add(obj)
             return obj
 
-    def _get_all_values(self, instance, owner):
+    def _get_all_values(self, instance: 'Target', owner: Optional[Type['Target']]) -> Set:
+        """
+        Retrieve all thread-local values currently cached for this property in the given instance.
+
+        :param instance: The target instance.
+        :param owner: The class owning the property (optional).
+        :returns: A set containing all cached values.
+        """
         with self.lock:
             # Grab a reference to all the objects at the time of the call by
             # using a regular set
             tls, values = self._get_tls(instance=instance)
             return set(values)
 
-    def __set__(self, instance, value):
+    def __set__(self, instance: 'Target', value):
+        """
+        Set the thread-local value for this property on the given instance.
+
+        :param instance: The target instance.
+        :param value: The value to set.
+        """
         tls, values = self._get_tls(instance)
         tls.value = value
         with self.lock:
             values.add(value)
 
-    def __delete__(self, instance):
+    def __delete__(self, instance: 'Target'):
+        """
+        Delete the thread-local value for this property from the given instance.
+
+        :param instance: The target instance.
+        """
         tls, values = self._get_tls(instance)
         with self.lock:
             try:
@@ -850,7 +1127,14 @@ class tls_property:
                 values.discard(value)
                 del tls.value
 
-    def _get_tls(self, instance):
+    def _get_tls(self, instance: 'Target') -> Any:
+        """
+        Retrieve the thread-local storage tuple for this property from the instance.
+        If not present, a new tuple is created and stored.
+
+        :param instance: The target instance.
+        :returns: A tuple (tls, values) where tls is a thread-local object and values is a WeakSet.
+        """
         dct = instance.__dict__
         name = self.name
         try:
@@ -868,40 +1152,56 @@ class tls_property:
         return tls
 
     @property
-    def basic_property(self):
+    def basic_property(self) -> property:
         """
         Return a basic property that can be used to access the TLS value
         without having to call it first.
 
         The drawback is that it's not possible to do anything over than
         getting/setting/deleting.
+
+        :returns: A property object for direct access.
         """
+
         def getter(instance, owner=None):
             prop = self.__get__(instance, owner)
             return prop()
 
         return property(getter, self.__set__, self.__delete__)
 
+
 class _BoundTLSProperty:
     """
     Simple proxy object to allow either calling it to get the TLS value, or get
     some other informations by calling methods.
+
+    :param tls_property: The tls_property descriptor.
+    :param instance: The target instance to which the property is bound.
+    :param owner: The owning class (optional).
     """
-    def __init__(self, tls_property, instance, owner):
+
+    def __init__(self, tls_property: tls_property, instance: 'Target', owner: Optional[Type['Target']]):
         self.tls_property = tls_property
         self.instance = instance
         self.owner = owner
 
     def __call__(self):
+        """
+        Retrieve the thread-local value by calling the underlying tls_property.
+
+        :returns: The thread-local value.
+        """
         return self.tls_property._get_value(
             instance=self.instance,
             owner=self.owner,
         )
 
-    def get_all_values(self):
+    def get_all_values(self) -> Set[Any]:
         """
         Returns all the thread-local values currently in use in the process for
         that property for that instance.
+
+        :returns: A set of all thread-local values.
         """
         return self.tls_property._get_all_values(
             instance=self.instance,
@@ -920,9 +1220,20 @@ class InitCheckpointMeta(type):
     ``is_in_use`` is set to ``True`` when an instance method is being called.
     This allows to detect reentrance.
     """
-    def __new__(metacls, name, bases, dct, **kwargs):
+
+    def __new__(metacls, name: str, bases: Tuple, dct: Dict, **kwargs: Dict) -> Type:
+        """
+        Create a new class with the augmented __init__ and methods for tracking initialization
+        and usage.
+
+        :param name: The name of the new class.
+        :param bases: Base classes for the new class.
+        :param dct: Dictionary of attributes for the new class.
+        :param kwargs: Additional keyword arguments.
+        :returns: The newly created class.
+        """
         cls = super().__new__(metacls, name, bases, dct, **kwargs)
-        init_f = cls.__init__
+        init_f = cls.__init__   # type:ignore
 
         @wraps(init_f)
         def init_wrapper(self, *args, **kwargs):
@@ -949,7 +1260,7 @@ class InitCheckpointMeta(type):
 
             return x
 
-        cls.__init__ = init_wrapper
+        cls.__init__ = init_wrapper  # type:ignore
 
         # Set the is_in_use attribute to allow external code to detect if the
         # methods are about to be re-entered.
@@ -977,8 +1288,8 @@ class InitCheckpointMeta(type):
             # Only wrap the methods (exposed as functions), not things like
             # classmethod or staticmethod
             if (
-                name not in ('__init__', '__new__') and
-                isinstance(attr, types.FunctionType)
+                    name not in ('__init__', '__new__') and
+                    isinstance(attr, types.FunctionType)
             ):
                 setattr(cls, name, make_wrapper(attr))
             elif isinstance(attr, property):
@@ -1000,7 +1311,7 @@ class InitCheckpoint(metaclass=InitCheckpointMeta):
     pass
 
 
-def groupby_value(dct):
+def groupby_value(dct: Dict[Any, Any]) -> Dict[Tuple[Any, ...], Any]:
     """
     Process the input dict such that all keys sharing the same values are
     grouped in a tuple, used as key in the returned dict.
@@ -1013,7 +1324,8 @@ def groupby_value(dct):
     }
 
 
-def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+def safe_extract(tar: 'TarFile', path: str = ".", members: Optional[List['TarInfo']] = None,
+                 *, numeric_owner: bool = False) -> None:
     """
     A wrapper around TarFile.extract all to mitigate CVE-2007-4995
     (see https://www.trellix.com/en-us/about/newsroom/stories/research/tarfile-exploiting-the-world.html)
@@ -1026,8 +1338,8 @@ def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
 
     tar.extractall(path, members, numeric_owner=numeric_owner)
 
-def _is_within_directory(directory, target):
 
+def _is_within_directory(directory: str, target: str) -> bool:
     abs_directory = os.path.abspath(directory)
     abs_target = os.path.abspath(target)
 
