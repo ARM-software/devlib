@@ -3138,6 +3138,447 @@ class LocalLinuxTarget(LinuxTarget):
             self.working_directory = '/tmp/devlib-target'
 
 
+class LocalTarget(Target):
+    """
+    Auto-detecting local target that works on both Linux and macOS.
+    
+    This class automatically detects the underlying operating system and provides
+    appropriate implementations for each platform, using native commands instead
+    of busybox when needed.
+    """
+    
+    path = posixpath
+
+    def __init__(self,
+                 connection_settings=None,
+                 platform=None,
+                 working_directory=None,
+                 executables_directory=None,
+                 connect=True,
+                 modules=None,
+                 load_default_modules=True,
+                 shell_prompt=DEFAULT_SHELL_PROMPT,
+                 conn_cls=LocalConnection,
+                 is_container=False,
+                 max_async=50,
+                 tmp_directory=None,
+                 ):
+        super(LocalTarget, self).__init__(connection_settings=connection_settings,
+                                          platform=platform,
+                                          working_directory=working_directory,
+                                          executables_directory=executables_directory,
+                                          connect=connect,
+                                          modules=modules,
+                                          load_default_modules=load_default_modules,
+                                          shell_prompt=shell_prompt,
+                                          conn_cls=conn_cls,
+                                          is_container=is_container,
+                                          max_async=max_async,
+                                          tmp_directory=tmp_directory,
+                                          )
+
+    @property
+    @memoized
+    def os(self):
+        """Detect the operating system"""
+        try:
+            uname_output = self.execute('uname -s').strip()
+            if uname_output == 'Darwin':
+                return 'darwin'
+            elif uname_output == 'Linux':
+                return 'linux'
+            else:
+                return 'unknown'
+        except TargetStableError:
+            return 'unknown'
+
+    def _is_macos(self):
+        """Check if running on macOS"""
+        return self.os == 'darwin'
+
+    def _is_linux(self):
+        """Check if running on Linux"""
+        return self.os == 'linux'
+
+    @property
+    @memoized
+    def abi(self):
+        """Get the system architecture"""
+        try:
+            arch = self.execute('uname -m').strip()
+            if self._is_macos():
+                # Map macOS architecture names to common names
+                arch_map = {
+                    'arm64': 'arm64',
+                    'x86_64': 'x86_64',
+                    'i386': 'x86',
+                }
+                return arch_map.get(arch, arch)
+            else:
+                # Linux architecture mapping
+                return ABI_MAP.get(arch, arch)
+        except TargetStableError:
+            return 'unknown'
+
+    @property
+    @memoized
+    def os_version(self):
+        """Get OS version information"""
+        if self._is_macos():
+            try:
+                # Get macOS version
+                version = self.execute('sw_vers -productVersion').strip()
+                build = self.execute('sw_vers -buildVersion').strip()
+                name = self.execute('sw_vers -productName').strip()
+                return {
+                    'name': name,
+                    'version': version,
+                    'build': build,
+                }
+            except TargetStableError:
+                return {}
+        elif self._is_linux():
+            try:
+                os_version = {}
+                if self.file_exists('/etc/os-release'):
+                    output = self.execute('cat /etc/os-release')
+                    for line in output.split('\n'):
+                        if '=' in line and not line.startswith('#'):
+                            key, value = line.split('=', 1)
+                            os_version[key] = value.strip('"')
+                return os_version
+            except TargetStableError:
+                return {}
+        return {}
+
+    @property
+    @memoized
+    def system_id(self):
+        """Get a unique system identifier"""
+        if self._is_macos():
+            try:
+                # Use hardware UUID as unique identifier
+                uuid = self.execute('system_profiler SPHardwareDataType | grep "Hardware UUID" | awk \'{print $3}\'').strip()
+                kernel = self.execute('uname -r').strip()
+                return f'{uuid}/{kernel}'
+            except TargetStableError:
+                return 'unknown'
+        elif self._is_linux():
+            try:
+                kernel = self.execute('uname -r')
+                hardware = self.execute('ip a | grep "link/ether" | sed "s/://g" | awk \'{print $2}\' | tr -d "\\n"')
+                try:
+                    filesystem = self.execute('ls /dev/disk/by-uuid | tr "\\n" "-" | sed "s/-$//"')
+                except TargetStableError:
+                    filesystem = 'unknown'
+                return f'{hardware}/{kernel}/{filesystem}'
+            except TargetStableError:
+                return 'unknown'
+        return 'unknown'
+
+    @property
+    @memoized
+    def cpuinfo(self):
+        """Get CPU information, using platform-appropriate method"""
+        try:
+            # First try the standard Linux approach
+            return Cpuinfo(self.execute('cat /proc/cpuinfo'))
+        except TargetStableError:
+            if self._is_macos():
+                # If /proc/cpuinfo doesn't exist (e.g., on macOS), use sysctl
+                return self._get_macos_cpuinfo()
+            else:
+                # For other systems, re-raise the error
+                raise
+
+    def _get_macos_cpuinfo(self):
+        """Generate /proc/cpuinfo-like output on macOS using sysctl"""
+        # Get CPU count
+        try:
+            ncpu = int(self.execute('sysctl -n hw.ncpu').strip())
+        except (TargetStableError, ValueError):
+            ncpu = 1
+        
+        # Get CPU brand string
+        try:
+            brand_string = self.execute('sysctl -n machdep.cpu.brand_string').strip()
+        except TargetStableError:
+            brand_string = 'Unknown CPU'
+        
+        # Get CPU family, model, etc. (if available)
+        cpu_family = ''
+        cpu_model = ''
+        try:
+            cpu_family = self.execute('sysctl -n machdep.cpu.family').strip()
+        except TargetStableError:
+            pass
+        
+        try:
+            cpu_model = self.execute('sysctl -n machdep.cpu.model').strip()
+        except TargetStableError:
+            pass
+        
+        # Generate /proc/cpuinfo-like format
+        cpuinfo_text = []
+        for i in range(ncpu):
+            section = [
+                f'processor\t: {i}',
+                f'model name\t: {brand_string}',
+            ]
+            if cpu_family:
+                section.append(f'cpu family\t: {cpu_family}')
+            if cpu_model:
+                section.append(f'model\t\t: {cpu_model}')
+            
+            cpuinfo_text.append('\n'.join(section))
+        
+        return Cpuinfo('\n\n'.join(cpuinfo_text))
+
+    @property
+    def hostname(self):
+        """Get hostname using appropriate command for the platform"""
+        if self._is_macos() or self._is_linux():
+            # Both macOS and Linux have native hostname command
+            return self.execute('hostname').strip()
+        else:
+            # Fallback to busybox for other systems
+            return self.execute('{} hostname'.format(self.busybox)).strip()
+
+    @property
+    @memoized  
+    def kernel_version(self):
+        """Get kernel version using appropriate command for the platform"""
+        if self._is_macos() or self._is_linux():
+            # Both macOS and Linux have native uname command
+            return KernelVersion(self.execute('uname -r -v').strip())
+        else:
+            # Fallback to busybox for other systems
+            return KernelVersion(self.execute('{} uname -r -v'.format(quote(self.busybox))).strip())
+
+    @property
+    def hostid(self):
+        """Get host ID using appropriate method for the platform"""
+        if self._is_macos():
+            try:
+                return int(self.execute('hostid').strip(), 16)
+            except (TargetStableError, ValueError):
+                # hostid might not be available on macOS, return a default
+                return 0
+        elif self._is_linux():
+            try:
+                return int(self.execute('hostid').strip(), 16)
+            except (TargetStableError, ValueError):
+                # Fallback to busybox
+                return int(self.execute('{} hostid'.format(self.busybox)).strip(), 16)
+        else:
+            # Fallback to busybox for other systems
+            return int(self.execute('{} hostid'.format(self.busybox)).strip(), 16)
+
+    @asyn.asyncf
+    async def write_value(self, path, value, verify=True, as_root=True):
+        """Write value to file using platform-appropriate command"""
+        if self._is_macos() or self._is_linux():
+            # Both macOS and Linux have native printf
+            self.async_manager.track_access(
+                asyn.PathAccess(namespace='target', path=path, mode='w')
+            )
+            value = str(value)
+
+            if verify:
+                # Use the same verification logic as the parent class but with native commands
+                cmd = '''
+orig=$(cat {path} 2>/dev/null || printf "")
+printf "%s" {value} > {path} || exit 10
+if [ {value} != "$orig" ]; then
+   trials=0
+   while [ "$(cat {path} 2>/dev/null)" != {value} ]; do
+       if [ $trials -ge 10 ]; then
+           cat {path}
+           exit 11
+       fi
+       sleep 0.01
+       trials=$((trials + 1))
+   done
+fi
+'''
+            else:
+                cmd = 'printf "%s" {value} > {path}'
+            cmd = cmd.format(path=quote(path), value=quote(value))
+
+            try:
+                await self.execute.asyn(cmd, check_exit_code=True, as_root=as_root)
+            except TargetCalledProcessError as e:
+                if e.returncode == 10:
+                    raise TargetStableError('Could not write "{value}" to {path}: {e.output}'.format(
+                        value=value, path=path, e=e))
+                elif verify and e.returncode == 11:
+                    raise TargetStableError(
+                        'Could not write "{value}" to {path}, reading "{actual}": {e.output}'.format(
+                            value=value, path=path, actual=e.output, e=e))
+        else:
+            # Fallback to parent implementation using busybox
+            await super(LocalTarget, self).write_value(path, value, verify, as_root)
+
+    @asyn.asyncf
+    async def read_tree_values_flat(self, path, depth=1, check_exit_code=True):
+        """Read tree values using platform-appropriate commands"""
+        if self._is_macos() or self._is_linux():
+            # Both macOS and Linux have native find and grep
+            self.async_manager.track_access(
+                asyn.PathAccess(namespace='target', path=path, mode='r')
+            )
+            
+            # Use native find and grep commands instead of busybox
+            # This mimics what the shutils script does: find files then grep them all
+            command = f'find {quote(path)} -follow -maxdepth {depth} -type f | xargs grep -s ""'
+            try:
+                output = await self.execute.asyn(command, check_exit_code=check_exit_code, as_root=self.is_rooted)
+            except TargetStableError:
+                # If the directory doesn't exist or find fails, return empty dict
+                return {}
+            
+            accumulator = defaultdict(list)
+            for entry in output.strip().split('\n'):
+                if ':' not in entry:
+                    continue
+                file_path, value = entry.strip().split(':', 1)
+                accumulator[file_path].append(value)
+
+            result = {k: '\n'.join(v).strip() for k, v in accumulator.items()}
+            return result
+        else:
+            # Fallback to parent implementation using busybox
+            return await super(LocalTarget, self).read_tree_values_flat(path, depth, check_exit_code)
+
+    async def _list_directory(self, path, as_root=False):
+        """List directory contents using platform-appropriate command"""
+        # Both macOS and Linux have native ls command
+        contents = await self.execute.asyn('ls -1 {}'.format(quote(path)), as_root=as_root)
+        return [x.strip() for x in contents.split('\n') if x.strip()]
+
+    @asyn.asyncf
+    async def install(self, filepath, timeout=None, with_name=None):
+        """Install executable using platform-appropriate method"""
+        executable_name = with_name or os.path.basename(filepath)
+        on_device_file = self.path.join(self.executables_directory, executable_name)
+        await self.push.asyn(filepath, on_device_file, timeout=timeout)
+        
+        # Both macOS and Linux use chmod
+        await self.execute.asyn("chmod +x {}".format(quote(on_device_file)))
+        self._installed_binaries[executable_name] = on_device_file
+        return on_device_file
+
+    @asyn.asyncf
+    async def uninstall(self, name):
+        """Uninstall executable"""
+        on_device_executable = self.path.join(self.executables_directory, name)
+        await self.remove.asyn(on_device_executable)
+
+    @asyn.asyncf
+    async def capture_screen(self, filepath):
+        """Capture screen using platform-appropriate method"""
+        timestamp = self.execute('date -u +"%Y-%m-%dT%H:%M:%SZ"').strip()
+        filepath = filepath.format(ts=timestamp)
+        
+        if self._is_macos():
+            await self.execute.asyn('screencapture -x {}'.format(quote(filepath)))
+        elif self._is_linux():
+            # Try various Linux screenshot tools
+            try:
+                await self.execute.asyn('scrot {}'.format(quote(filepath)))
+            except TargetStableError:
+                try:
+                    await self.execute.asyn('gnome-screenshot -f {}'.format(quote(filepath)))
+                except TargetStableError:
+                    raise TargetStableError('No screenshot tool available (tried scrot, gnome-screenshot)')
+        else:
+            raise TargetStableError('Screen capture not supported on this platform')
+
+    def wait_boot_complete(self, timeout=10):
+        """On local systems, assume boot is always complete"""
+        pass
+
+    @asyn.asyncf
+    async def get_pids_of(self, process_name):
+        """Get PIDs of processes with given name"""
+        result = []
+        try:
+            if self._is_macos() or self._is_linux():
+                # Both have pgrep
+                output = await self.execute.asyn('pgrep -f {}'.format(quote(process_name)))
+                for line in output.strip().split('\n'):
+                    if line.strip():
+                        result.append(int(line.strip()))
+            else:
+                # Fallback: parse ps output
+                ps_output = await self.ps.asyn()
+                for entry in ps_output:
+                    if process_name in entry.name:
+                        result.append(entry.pid)
+        except TargetStableError:
+            # pgrep returns non-zero when no matches found
+            pass
+        return result
+
+    @asyn.asyncf
+    async def ps(self, threads=False, **kwargs):
+        """Get process list using platform-appropriate command"""
+        if self._is_macos():
+            # macOS ps with BSD-style options
+            command = 'ps -A -o user,pid,ppid,pcpu,rss,stat,command'
+            if threads:
+                command = 'ps -A -M -o user,pid,ppid,pcpu,rss,stat,command'
+        elif self._is_linux():
+            # Linux ps with GNU-style options
+            command = 'ps -A -o user,pid,ppid,pcpu,rss,stat,command'
+            if threads:
+                command = 'ps -A -L -o user,pid,ppid,pcpu,rss,stat,command'
+        else:
+            # Fallback to simple ps
+            command = 'ps'
+        
+        lines = iter((await self.execute.asyn(command)).split('\n'))
+        next(lines)  # header
+        result = []
+        for line in lines:
+            if not line.strip():
+                continue
+            parts = line.strip().split(None, 6)
+            if len(parts) >= 7:
+                entry = PsEntry(
+                    user=parts[0],
+                    pid=int(parts[1]),
+                    tid=int(parts[1]),  # Use PID as TID for compatibility
+                    ppid=int(parts[2]),
+                    vsize=0,  # Not easily available in ps output
+                    rss=int(parts[4]) if parts[4].isdigit() else 0,
+                    wchan='',  # Not available
+                    pc='',     # Not available
+                    state=parts[5],
+                    name=parts[6] if len(parts) > 6 else ''
+                )
+                result.append(entry)
+        
+        # Apply filters if provided
+        if not kwargs:
+            return result
+        else:
+            filtered_result = []
+            for entry in result:
+                if all(getattr(entry, k) == v for k, v in kwargs.items() if hasattr(entry, k)):
+                    filtered_result.append(entry)
+            return filtered_result
+
+    def _resolve_paths(self):
+        """Set up default paths"""
+        if self.working_directory is None:
+            self.working_directory = '/tmp/devlib-target'
+
+
+# Keep LocalMacTarget as an alias for backward compatibility
+LocalMacTarget = LocalTarget
+
+
 def _get_model_name(section):
     name_string = section['model name']
     parts = name_string.split('@')[0].strip().split()
