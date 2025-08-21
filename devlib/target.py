@@ -2691,7 +2691,13 @@ PsEntry = namedtuple('PsEntry', 'user pid tid ppid vsize rss wchan pc state name
 LsmodEntry = namedtuple('LsmodEntry', ['name', 'size', 'use_count', 'used_by'])
 
 
-class Cpuinfo(object):
+class BaseCpuinfo(object):
+    """
+    Base class for CPU information that can be constructed from structured data.
+    
+    This class allows creating CPU info objects directly from structured sections
+    data rather than requiring text parsing.
+    """
 
     @property
     @memoized
@@ -2719,10 +2725,15 @@ class Cpuinfo(object):
                 global_name = _get_part_name(section)
         return [caseless_string(c or global_name) for c in cpu_names]
 
-    def __init__(self, text):
-        self.sections = None
+    def __init__(self, sections=None):
+        """
+        Initialize with structured sections data.
+        
+        :param sections: List of dictionaries, each representing a CPU section
+        :type sections: list of dict
+        """
+        self.sections = sections or []
         self.text = None
-        self.parse(text)
 
     @memoized
     def get_cpu_features(self, cpuid=0):
@@ -2741,6 +2752,38 @@ class Cpuinfo(object):
                 global_features = section.get('flags').split()
         return global_features
 
+    def __str__(self):
+        return 'CpuInfo({})'.format(self.cpu_names)
+
+    __repr__ = __str__
+
+
+class Cpuinfo(BaseCpuinfo):
+    """
+    CPU information class that can parse text format or be constructed from structured data.
+    
+    This class maintains backward compatibility by parsing text in __init__ while
+    also supporting the structured approach via the base class.
+    """
+
+    def __init__(self, text=None, sections=None):
+        """
+        Initialize from either text or structured sections data.
+        
+        :param text: Text to parse in /proc/cpuinfo format
+        :type text: str
+        :param sections: Pre-structured sections data
+        :type sections: list of dict
+        """
+        if text is not None:
+            super(Cpuinfo, self).__init__()
+            self.text = None
+            self.parse(text)
+        elif sections is not None:
+            super(Cpuinfo, self).__init__(sections)
+        else:
+            raise ValueError("Either 'text' or 'sections' must be provided")
+
     def parse(self, text):
         self.sections = []
         current_section = {}
@@ -2754,11 +2797,6 @@ class Cpuinfo(object):
                 self.sections.append(current_section)
                 current_section = {}
         self.sections.append(current_section)
-
-    def __str__(self):
-        return 'CpuInfo({})'.format(self.cpu_names)
-
-    __repr__ = __str__
 
 
 class KernelVersion(object):
@@ -3180,14 +3218,16 @@ class LocalTarget(LocalLinuxTarget):
         """Detect the operating system"""
         try:
             uname_output = self.execute('uname -s').strip()
-            if uname_output == 'Darwin':
-                return 'darwin'
-            elif uname_output == 'Linux':
-                return 'linux'
-            else:
-                return 'unknown'
-        except TargetStableError:
-            return 'unknown'
+        except Exception as e:
+            raise TargetStableError("Failed to detect operating system") from e
+
+        if uname_output == "Darwin":
+            return "darwin"
+        elif uname_output == "Linux":
+            return "linux"
+        else:
+            raise TargetStableError(f"Unsupported operating system: {uname_output}")
+
 
     def _is_macos(self):
         """Check if running on macOS"""
@@ -3203,16 +3243,17 @@ class LocalTarget(LocalLinuxTarget):
         """Get the system architecture"""
         if self._is_macos():
             try:
-                arch = self.execute('uname -m').strip()
-                # Map macOS architecture names to common names
-                arch_map = {
-                    'arm64': 'arm64',
-                    'x86_64': 'x86_64',
-                    'i386': 'x86',
-                }
-                return arch_map.get(arch, arch)
-            except TargetStableError:
-                return 'unknown'
+                arch = self.execute("uname -m").strip()
+            except Exception as e:
+                raise TargetStableError("Failed to detect system architecture on macOS") from e
+
+            # Map macOS architecture names to common names
+            arch_map = {
+                "arm64": "arm64",
+                "x86_64": "x86_64",
+                "i386": "x86",
+            }
+            return arch_map.get(arch, arch)
         else:
             # Use parent implementation for Linux systems
             return super(LocalTarget, self).abi
@@ -3236,7 +3277,7 @@ class LocalTarget(LocalLinuxTarget):
                 return {}
         else:
             # Use parent implementation for Linux and other systems
-            return super(LocalTarget, self).os_version
+            return super().os_version
 
     @property
     @memoized
@@ -3249,7 +3290,7 @@ class LocalTarget(LocalLinuxTarget):
                 kernel = self.execute('uname -r').strip()
                 return f'{uuid}/{kernel}'
             except TargetStableError:
-                return 'unknown'
+                raise TargetStableError('Failed to get system identifier on macOS')
         else:
             # Use parent implementation for Linux systems
             return super(LocalTarget, self).system_id
@@ -3266,7 +3307,7 @@ class LocalTarget(LocalLinuxTarget):
             return super(LocalTarget, self).cpuinfo
 
     def _get_macos_cpuinfo(self):
-        """Generate /proc/cpuinfo-like output on macOS using sysctl"""
+        """Generate CPU information on macOS using sysctl"""
         # Get CPU count
         try:
             ncpu = int(self.execute('sysctl -n hw.ncpu').strip())
@@ -3292,21 +3333,21 @@ class LocalTarget(LocalLinuxTarget):
         except TargetStableError:
             pass
         
-        # Generate /proc/cpuinfo-like format
-        cpuinfo_text = []
+        # Create structured sections data
+        sections = []
         for i in range(ncpu):
-            section = [
-                f'processor\t: {i}',
-                f'model name\t: {brand_string}',
-            ]
+            section = {
+                'processor': str(i),
+                'model name': brand_string,
+            }
             if cpu_family:
-                section.append(f'cpu family\t: {cpu_family}')
+                section['cpu family'] = cpu_family
             if cpu_model:
-                section.append(f'model\t\t: {cpu_model}')
+                section['model'] = cpu_model
             
-            cpuinfo_text.append('\n'.join(section))
+            sections.append(section)
         
-        return Cpuinfo('\n\n'.join(cpuinfo_text))
+        return Cpuinfo(sections=sections)
 
     @property
     def hostname(self):
