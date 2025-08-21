@@ -18,7 +18,7 @@ Initializations for devlib module
 '''
 
 from devlib.target import (
-        Target, LinuxTarget, AndroidTarget, LocalLinuxTarget,
+        Target, LinuxTarget, AndroidTarget, LocalLinuxTarget, LocalTarget, LocalMacTarget,
         ChromeOsTarget,
 )
 

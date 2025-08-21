@@ -27,7 +27,7 @@ import logging
 import os
 import pytest
 
-from devlib import AndroidTarget, ChromeOsTarget, LinuxTarget, LocalLinuxTarget
+from devlib import AndroidTarget, ChromeOsTarget, LinuxTarget, LocalLinuxTarget, LocalTarget
 from devlib._target_runner import NOPTargetRunner, QEMUTargetRunner
 from devlib.utils.android import AdbConnection
 from devlib.utils.misc import load_struct_from_yaml
@@ -101,6 +101,11 @@ def build_target_runners():
             logger.info('> LocalLinux target: %s', repr(target_info))
             ll_target = LocalLinuxTarget(connection_settings=target_info['connection_settings'])
             target_runners.append(NOPTargetRunner(ll_target))
+
+        elif target_class is LocalTarget:
+            logger.info('> Local target: %s', repr(target_info))
+            l_target = LocalTarget(connection_settings=target_info['connection_settings'])
+            target_runners.append(NOPTargetRunner(l_target))
 
         elif target_class is QEMUTargetRunner:
             logger.info('> QEMU target runner: %s', repr(target_info))
