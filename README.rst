@@ -1,5 +1,15 @@
-devlib
-======
+[DEPRECATED] devlib
+++++++++++++++++++++++++++++++++++++++++++++
+
+⚠️ **Development of this project has moved to a new repository.**
+
+Please visit the new location for the latest code, issues, and contributions:
+
+https://gitlab.arm.com/tooling/workload-automation/devlib
+
+This repository is no longer actively maintained.
+
+-------------
 
 ``devlib`` exposes an interface for interacting with and collecting
 measurements from a variety of devices (such as mobile phones, tablets and
