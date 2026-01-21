@@ -33,7 +33,9 @@ import logging
 import signal
 import sys
 
-logger = logging.getLogger('aep-parser')
+from devlib.utils.misc import get_logger
+
+logger = get_logger('aep-parser')
 
 # pylint: disable=attribute-defined-outside-init
 class AepParser(object):

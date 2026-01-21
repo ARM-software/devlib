@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 # limitations under the License.
 #
 
-import logging
 import os
 import shutil
 import sys
@@ -24,11 +23,14 @@ from collections import namedtuple
 from shlex import quote
 
 # pylint: disable=redefined-builtin
-from devlib.exception  import WorkerThreadError, TargetNotRespondingError, TimeoutError
+from devlib.exception import WorkerThreadError, TargetNotRespondingError, TimeoutError
 from devlib.utils.csvutil import csvwriter
+from devlib.utils.misc import get_logger
+from typing import List, Optional, TYPE_CHECKING, cast
+if TYPE_CHECKING:
+    from devlib.target import Target
 
-
-logger = logging.getLogger('rendering')
+logger = get_logger('rendering')
 
 SurfaceFlingerFrame = namedtuple('SurfaceFlingerFrame',
                                  'desired_present_time actual_present_time frame_ready_time')
@@ -38,12 +40,12 @@ VSYNC_INTERVAL = 16666667
 
 class FrameCollector(threading.Thread):
 
-    def __init__(self, target, period):
+    def __init__(self, target: 'Target', period: int):
         super(FrameCollector, self).__init__()
         self.target = target
         self.period = period
         self.stop_signal = threading.Event()
-        self.frames = []
+        self.frames: List = []
 
         self.temp_file = None
         self.refresh_period = None
@@ -51,7 +53,7 @@ class FrameCollector(threading.Thread):
         self.unresponsive_count = 0
         self.last_ready_time = 0
         self.exc = None
-        self.header = None
+        self.header: Optional[List[str]] = None
 
     def run(self):
         logger.debug('Frame data collection started.')
@@ -95,17 +97,18 @@ class FrameCollector(threading.Thread):
         os.unlink(self.temp_file)
         self.temp_file = None
 
-    def write_frames(self, outfile, columns=None):
+    def write_frames(self, outfile, columns: Optional[List[str]] = None):
         if columns is None:
             header = self.header
             frames = self.frames
         else:
-            indexes = []
+            indexes: List = []
             for c in columns:
-                if c not in self.header:
-                    msg = 'Invalid column "{}"; must be in {}'
-                    raise ValueError(msg.format(c, self.header))
-                indexes.append(self.header.index(c))
+                if self.header:
+                    if c not in self.header:
+                        msg = 'Invalid column "{}"; must be in {}'
+                        raise ValueError(msg.format(c, self.header))
+                    indexes.append(self.header.index(c))
             frames = [[f[i] for i in indexes] for f in self.frames]
             header = columns
         with csvwriter(outfile) as writer:
@@ -128,7 +131,7 @@ class SurfaceFlingerFrameCollector(FrameCollector):
     def __init__(self, target, period, view, header=None):
         super(SurfaceFlingerFrameCollector, self).__init__(target, period)
         self.view = view
-        self.header = header or SurfaceFlingerFrame._fields
+        self.header = cast(List[str], header or SurfaceFlingerFrame._fields)
 
     def collect_frames(self, wfh):
         activities = [a for a in self.list() if a.startswith(self.view)]
@@ -180,7 +183,7 @@ class SurfaceFlingerFrameCollector(FrameCollector):
         if len(parts) == 3:
             frame = SurfaceFlingerFrame(*parts)
             if not frame.frame_ready_time:
-                return # "null" frame
+                return  # "null" frame
             if frame.frame_ready_time <= self.last_ready_time:
                 return  # duplicate frame
             if (frame.frame_ready_time - frame.desired_present_time) > self.drop_threshold:
@@ -196,8 +199,8 @@ class SurfaceFlingerFrameCollector(FrameCollector):
             logger.warning(msg)
 
 
-def read_gfxinfo_columns(target):
-    output = target.execute('dumpsys gfxinfo --list framestats')
+def read_gfxinfo_columns(target: 'Target') -> List[str]:
+    output: str = target.execute('dumpsys gfxinfo --list framestats')
     lines = iter(output.split('\n'))
     for line in lines:
         if line.startswith('---PROFILEDATA---'):
@@ -222,7 +225,7 @@ class GfxinfoFrameCollector(FrameCollector):
     def clear(self):
         pass
 
-    def _init_header(self, header):
+    def _init_header(self, header: Optional[List[str]]):
         if header is not None:
             self.header = header
         else:

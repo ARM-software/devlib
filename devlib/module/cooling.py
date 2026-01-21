@@ -1,4 +1,4 @@
-#    Copyright 2014-2015 ARM Limited
+#    Copyright 2014-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,50 +16,68 @@
 
 from devlib.module import Module
 from devlib.utils.serial_port import open_serial_connection
+from typing import TYPE_CHECKING, cast
+from pexpect import fdpexpect
+if TYPE_CHECKING:
+    from devlib.target import Target
 
 
 class MbedFanActiveCoolingModule(Module):
-
-    name = 'mbed-fan'
-    timeout = 30
+    """
+    Module to control active cooling using fan
+    """
+    name: str = 'mbed-fan'
+    timeout: int = 30
 
     @staticmethod
-    def probe(target):
+    def probe(target: 'Target') -> bool:
         return True
 
-    def __init__(self, target, port='/dev/ttyACM0', baud=115200, fan_pin=0):
+    def __init__(self, target: 'Target', port: str = '/dev/ttyACM0', baud: int = 115200, fan_pin: int = 0):
         super(MbedFanActiveCoolingModule, self).__init__(target)
         self.port = port
         self.baud = baud
         self.fan_pin = fan_pin
 
-    def start(self):
+    def start(self) -> None:
+        """
+        send motor start to fan
+        """
         with open_serial_connection(timeout=self.timeout,
                                     port=self.port,
                                     baudrate=self.baud) as target:
             # pylint: disable=no-member
-            target.sendline('motor_{}_1'.format(self.fan_pin))
+            cast(fdpexpect.fdspawn, target).sendline('motor_{}_1'.format(self.fan_pin))
 
-    def stop(self):
+    def stop(self) -> None:
+        """
+        send motor stop to fan
+        """
         with open_serial_connection(timeout=self.timeout,
                                     port=self.port,
                                     baudrate=self.baud) as target:
             # pylint: disable=no-member
-            target.sendline('motor_{}_0'.format(self.fan_pin))
+            cast(fdpexpect.fdspawn, target).sendline('motor_{}_0'.format(self.fan_pin))
 
 
 class OdroidXU3ctiveCoolingModule(Module):
 
-    name = 'odroidxu3-fan'
+    name: str = 'odroidxu3-fan'
 
     @staticmethod
-    def probe(target):
+    def probe(target: 'Target') -> bool:
         return target.file_exists('/sys/devices/odroid_fan.15/fan_mode')
 
-    def start(self):
+    def start(self) -> None:
+        """
+        start fan
+        """
         self.target.write_value('/sys/devices/odroid_fan.15/fan_mode', 0, verify=False)
         self.target.write_value('/sys/devices/odroid_fan.15/pwm_duty', 255, verify=False)
 
     def stop(self):
+        """
+        stop fan
+        """
         self.target.write_value('/sys/devices/odroid_fan.15/fan_mode', 0, verify=False)
         self.target.write_value('/sys/devices/odroid_fan.15/pwm_duty', 1, verify=False)

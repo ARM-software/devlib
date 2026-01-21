@@ -1,4 +1,4 @@
-#    Copyright 2014-2018 ARM Limited
+#    Copyright 2014-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 # limitations under the License.
 #
 # pylint: disable=attribute-defined-outside-init
-from past.builtins import basestring
 
 from operator import attrgetter
 from pprint import pformat
@@ -23,24 +22,27 @@ from devlib.exception import TargetStableError
 from devlib.utils.types import integer, boolean
 from devlib.utils.misc import memoized
 import devlib.utils.asyn as asyn
+from typing import Optional, TYPE_CHECKING, Union, List
+if TYPE_CHECKING:
+    from devlib.target import Target
 
 
 class CpuidleState(object):
 
     @property
-    def usage(self):
+    def usage(self) -> int:
         return integer(self.get('usage'))
 
     @property
-    def time(self):
+    def time(self) -> int:
         return integer(self.get('time'))
 
     @property
-    def is_enabled(self):
+    def is_enabled(self) -> bool:
         return not boolean(self.get('disable'))
 
     @property
-    def ordinal(self):
+    def ordinal(self) -> int:
         i = len(self.id)
         while self.id[i - 1].isdigit():
             i -= 1
@@ -48,7 +50,8 @@ class CpuidleState(object):
                 raise ValueError('invalid idle state name: "{}"'.format(self.id))
         return int(self.id[i:])
 
-    def __init__(self, target, index, path, name, desc, power, latency, residency):
+    def __init__(self, target: 'Target', index: int, path: str, name: str,
+                 desc: str, power: int, latency: int, residency: Optional[int]):
         self.target = target
         self.index = index
         self.path = path
@@ -57,31 +60,43 @@ class CpuidleState(object):
         self.power = power
         self.latency = latency
         self.residency = residency
-        self.id = self.target.path.basename(self.path)
-        self.cpu = self.target.path.basename(self.target.path.dirname(path))
+        self.id: str = self.target.path.basename(self.path)
+        self.cpu: str = self.target.path.basename(self.target.path.dirname(path))
 
     @asyn.asyncf
-    async def enable(self):
+    async def enable(self) -> None:
+        """
+        enable idle state
+        """
         await self.set.asyn('disable', 0)
 
     @asyn.asyncf
-    async def disable(self):
+    async def disable(self) -> None:
+        """
+        disable idle state
+        """
         await self.set.asyn('disable', 1)
 
     @asyn.asyncf
-    async def get(self, prop):
+    async def get(self, prop: str) -> str:
+        """
+        get the property
+        """
         property_path = self.target.path.join(self.path, prop)
         return await self.target.read_value.asyn(property_path)
 
     @asyn.asyncf
-    async def set(self, prop, value):
+    async def set(self, prop: str, value: str) -> None:
+        """
+        set the property
+        """
         property_path = self.target.path.join(self.path, prop)
         await self.target.write_value.asyn(property_path, value)
 
     def __eq__(self, other):
         if isinstance(other, CpuidleState):
             return (self.name == other.name) and (self.desc == other.desc)
-        elif isinstance(other, basestring):
+        elif isinstance(other, str):
             return (self.name == other) or (self.desc == other)
         else:
             return False
@@ -96,19 +111,23 @@ class CpuidleState(object):
 
 
 class Cpuidle(Module):
-
+    """
+    ``cpuidle`` is the kernel subsystem for managing CPU low power (idle) states.
+    """
     name = 'cpuidle'
     root_path = '/sys/devices/system/cpu/cpuidle'
 
     @staticmethod
     @asyn.asyncf
-    async def probe(target):
+    async def probe(target: 'Target') -> bool:
         return await target.file_exists.asyn(Cpuidle.root_path)
 
-    def __init__(self, target):
+    def __init__(self, target: 'Target'):
         super(Cpuidle, self).__init__(target)
 
-        basepath = '/sys/devices/system/cpu/'
+        basepath: str = '/sys/devices/system/cpu/'
+        # FIXME - annotating the values_tree based on read_tree_values return type is causing errors due to recursive
+        # definition of the Node type. leaving it out for now
         values_tree = self.target.read_tree_values(basepath, depth=4, check_exit_code=False)
 
         self._states = {
@@ -137,12 +156,18 @@ class Cpuidle(Module):
 
         self.logger.debug('Adding cpuidle states:\n{}'.format(pformat(self._states)))
 
-    def get_states(self, cpu=0):
+    def get_states(self, cpu: Union[int, str] = 0) -> List[CpuidleState]:
+        """
+        get the cpu idle states
+        """
         if isinstance(cpu, int):
             cpu = 'cpu{}'.format(cpu)
         return self._states.get(cpu, [])
 
-    def get_state(self, state, cpu=0):
+    def get_state(self, state: Union[str, int], cpu: Union[str, int] = 0) -> CpuidleState:
+        """
+        get the specific cpuidle state values
+        """
         if isinstance(state, int):
             try:
                 return self.get_states(cpu)[state]
@@ -155,29 +180,41 @@ class Cpuidle(Module):
             raise ValueError('Cpuidle state {} does not exist'.format(state))
 
     @asyn.asyncf
-    async def enable(self, state, cpu=0):
+    async def enable(self, state: Union[str, int], cpu: Union[str, int] = 0) -> None:
+        """
+        enable the specific cpu idle state
+        """
         await self.get_state(state, cpu).enable.asyn()
 
     @asyn.asyncf
-    async def disable(self, state, cpu=0):
+    async def disable(self, state: Union[str, int], cpu: Union[str, int] = 0) -> None:
+        """
+        disable the specific cpu idle state
+        """
         await self.get_state(state, cpu).disable.asyn()
 
     @asyn.asyncf
-    async def enable_all(self, cpu=0):
+    async def enable_all(self, cpu: Union[str, int] = 0) -> None:
+        """
+        enable all the cpu idle states
+        """
         await self.target.async_manager.concurrently(
             state.enable.asyn()
             for state in self.get_states(cpu)
         )
 
     @asyn.asyncf
-    async def disable_all(self, cpu=0):
+    async def disable_all(self, cpu: Union[str, int] = 0) -> None:
+        """
+        disable all cpu idle states
+        """
         await self.target.async_manager.concurrently(
             state.disable.asyn()
             for state in self.get_states(cpu)
         )
 
     @asyn.asyncf
-    async def perturb_cpus(self):
+    async def perturb_cpus(self) -> None:
         """
         Momentarily wake each CPU. Ensures cpu_idle events in trace file.
         """
@@ -185,25 +222,28 @@ class Cpuidle(Module):
         await self.target._execute_util.asyn('cpuidle_wake_all_cpus')
 
     @asyn.asyncf
-    async def get_driver(self):
+    async def get_driver(self) -> str:
+        """
+        get the current driver of idle states
+        """
         return await self.target.read_value.asyn(self.target.path.join(self.root_path, 'current_driver'))
 
     @memoized
-    def list_governors(self):
+    def list_governors(self) -> List[str]:
         """Returns a list of supported idle governors."""
-        sysfile = self.target.path.join(self.root_path, 'available_governors')
-        output = self.target.read_value(sysfile)
+        sysfile: str = self.target.path.join(self.root_path, 'available_governors')
+        output: str = self.target.read_value(sysfile)
         return output.strip().split()
 
     @asyn.asyncf
-    async def get_governor(self):
+    async def get_governor(self) -> str:
         """Returns the currently selected idle governor."""
         path = self.target.path.join(self.root_path, 'current_governor_ro')
         if not await self.target.file_exists.asyn(path):
             path = self.target.path.join(self.root_path, 'current_governor')
         return await self.target.read_value.asyn(path)
 
-    def set_governor(self, governor):
+    def set_governor(self, governor: str) -> None:
         """
         Set the idle governor for the system.
 
@@ -213,8 +253,8 @@ class Cpuidle(Module):
         :raises TargetStableError if governor is not supported by the CPU, or
         if, for some reason, the governor could not be set.
         """
-        supported = self.list_governors()
+        supported: List[str] = self.list_governors()
         if governor not in supported:
             raise TargetStableError('Governor {} not supported'.format(governor))
-        sysfile = self.target.path.join(self.root_path, 'current_governor')
+        sysfile: str = self.target.path.join(self.root_path, 'current_governor')
         self.target.write_value(sysfile, governor)

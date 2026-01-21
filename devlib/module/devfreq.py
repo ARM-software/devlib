@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,14 +15,20 @@
 from devlib.module import Module
 from devlib.exception import TargetStableError
 from devlib.utils.misc import memoized
+from typing import TYPE_CHECKING, List, Union, Dict
+if TYPE_CHECKING:
+    from devlib.target import Target
+
 
 class DevfreqModule(Module):
-
+    """
+    The devfreq framework in Linux is used for dynamic voltage and frequency scaling (DVFS) of various devices.
+    """
     name = 'devfreq'
 
     @staticmethod
-    def probe(target):
-        path = '/sys/class/devfreq/'
+    def probe(target: 'Target') -> bool:
+        path: str = '/sys/class/devfreq/'
         if not target.file_exists(path):
             return False
 
@@ -33,26 +39,26 @@ class DevfreqModule(Module):
         return True
 
     @memoized
-    def list_devices(self):
+    def list_devices(self) -> List[str]:
         """Returns a list of devfreq devices supported by the target platform."""
         sysfile = '/sys/class/devfreq/'
         return self.target.list_directory(sysfile)
 
     @memoized
-    def list_governors(self, device):
+    def list_governors(self, device: str) -> List[str]:
         """Returns a list of governors supported by the device."""
-        sysfile = '/sys/class/devfreq/{}/available_governors'.format(device)
-        output = self.target.read_value(sysfile)
+        sysfile: str = '/sys/class/devfreq/{}/available_governors'.format(device)
+        output: str = self.target.read_value(sysfile)
         return output.strip().split()
 
-    def get_governor(self, device):
+    def get_governor(self, device: Union[str, int]) -> str:
         """Returns the governor currently set for the specified device."""
         if isinstance(device, int):
             device = 'device{}'.format(device)
         sysfile = '/sys/class/devfreq/{}/governor'.format(device)
         return self.target.read_value(sysfile)
 
-    def set_governor(self, device, governor):
+    def set_governor(self, device: str, governor: str) -> None:
         """
         Set the governor for the specified device.
 
@@ -68,25 +74,25 @@ class DevfreqModule(Module):
                  for some reason, the governor could not be set.
 
         """
-        supported = self.list_governors(device)
+        supported: List[str] = self.list_governors(device)
         if governor not in supported:
             raise TargetStableError('Governor {} not supported for device {}'.format(governor, device))
-        sysfile = '/sys/class/devfreq/{}/governor'.format(device)
+        sysfile: str = '/sys/class/devfreq/{}/governor'.format(device)
         self.target.write_value(sysfile, governor)
 
     @memoized
-    def list_frequencies(self, device):
+    def list_frequencies(self, device: str) -> List[int]:
         """
         Returns a list of frequencies supported by the device or an empty list
         if could not be found.
         """
-        cmd = 'cat /sys/class/devfreq/{}/available_frequencies'.format(device)
-        output = self.target.execute(cmd)
-        available_frequencies = [int(freq) for freq in output.strip().split()]
+        cmd: str = 'cat /sys/class/devfreq/{}/available_frequencies'.format(device)
+        output: str = self.target.execute(cmd)
+        available_frequencies: List[int] = [int(freq) for freq in output.strip().split()]
 
         return available_frequencies
 
-    def get_min_frequency(self, device):
+    def get_min_frequency(self, device: str) -> int:
         """
         Returns the min frequency currently set for the specified device.
 
@@ -100,7 +106,7 @@ class DevfreqModule(Module):
         sysfile = '/sys/class/devfreq/{}/min_freq'.format(device)
         return self.target.read_int(sysfile)
 
-    def set_min_frequency(self, device, frequency, exact=True):
+    def set_min_frequency(self, device: str, frequency: Union[int, str], exact: bool = True) -> None:
         """
         Sets the minimum value for device frequency. Actual frequency will
         depend on the thermal governor used and may vary during execution. The
@@ -117,19 +123,19 @@ class DevfreqModule(Module):
         :raises: ValueError if ``frequency`` is not an integer.
 
         """
-        available_frequencies = self.list_frequencies(device)
+        available_frequencies: List[int] = self.list_frequencies(device)
         try:
             value = int(frequency)
             if exact and available_frequencies and value not in available_frequencies:
                 raise TargetStableError('Can\'t set {} frequency to {}\nmust be in {}'.format(device,
-                                                                                        value,
-                                                                                        available_frequencies))
-            sysfile = '/sys/class/devfreq/{}/min_freq'.format(device)
+                                                                                              value,
+                                                                                              available_frequencies))
+            sysfile: str = '/sys/class/devfreq/{}/min_freq'.format(device)
             self.target.write_value(sysfile, value)
         except ValueError:
             raise ValueError('Frequency must be an integer; got: "{}"'.format(frequency))
 
-    def get_frequency(self, device):
+    def get_frequency(self, device: str) -> int:
         """
         Returns the current frequency currently set for the specified device.
 
@@ -140,10 +146,10 @@ class DevfreqModule(Module):
         :raises: TargetStableError if for some reason the frequency could not be read.
 
         """
-        sysfile = '/sys/class/devfreq/{}/cur_freq'.format(device)
+        sysfile: str = '/sys/class/devfreq/{}/cur_freq'.format(device)
         return self.target.read_int(sysfile)
 
-    def get_max_frequency(self, device):
+    def get_max_frequency(self, device: str) -> int:
         """
         Returns the max frequency currently set for the specified device.
 
@@ -153,10 +159,10 @@ class DevfreqModule(Module):
 
         :raises: TargetStableError if for some reason the frequency could not be read.
         """
-        sysfile = '/sys/class/devfreq/{}/max_freq'.format(device)
+        sysfile: str = '/sys/class/devfreq/{}/max_freq'.format(device)
         return self.target.read_int(sysfile)
 
-    def set_max_frequency(self, device, frequency, exact=True):
+    def set_max_frequency(self, device: str, frequency: Union[int, str], exact: bool = True) -> None:
         """
         Sets the maximum value for device frequency. Actual frequency will
         depend on the Governor used and may vary during execution. The value
@@ -173,7 +179,7 @@ class DevfreqModule(Module):
         :raises: ValueError if ``frequency`` is not an integer.
 
         """
-        available_frequencies = self.list_frequencies(device)
+        available_frequencies: List[int] = self.list_frequencies(device)
         try:
             value = int(frequency)
         except ValueError:
@@ -181,12 +187,12 @@ class DevfreqModule(Module):
 
         if exact and value not in available_frequencies:
             raise TargetStableError('Can\'t set {} frequency to {}\nmust be in {}'.format(device,
-                                                                                    value,
-                                                                                    available_frequencies))
-        sysfile = '/sys/class/devfreq/{}/max_freq'.format(device)
+                                                                                          value,
+                                                                                          available_frequencies))
+        sysfile: str = '/sys/class/devfreq/{}/max_freq'.format(device)
         self.target.write_value(sysfile, value)
 
-    def set_governor_for_devices(self, devices, governor):
+    def set_governor_for_devices(self, devices: List[str], governor: str) -> None:
         """
         Set the governor for the specified list of devices.
 
@@ -195,7 +201,7 @@ class DevfreqModule(Module):
         for device in devices:
             self.set_governor(device, governor)
 
-    def set_all_governors(self, governor):
+    def set_all_governors(self, governor: str) -> None:
         """
         Set the specified governor for all the (available) devices
         """
@@ -204,22 +210,22 @@ class DevfreqModule(Module):
                 'devfreq_set_all_governors {}'.format(governor), as_root=True)
         except TargetStableError as e:
             if ("echo: I/O error" in str(e) or
-                "write error: Invalid argument" in str(e)):
+               "write error: Invalid argument" in str(e)):
 
-                devs_unsupported = [d for d in self.target.list_devices()
-                                    if governor not in self.list_governors(d)]
+                devs_unsupported: List[str] = [d for d in self.list_devices()
+                                               if governor not in self.list_governors(d)]
                 raise TargetStableError("Governor {} unsupported for devices {}".format(
                     governor, devs_unsupported))
             else:
                 raise
 
-    def get_all_governors(self):
+    def get_all_governors(self) -> Dict[str, str]:
         """
         Get the current governor for all the (online) CPUs
         """
-        output = self.target._execute_util(  # pylint: disable=protected-access
-                'devfreq_get_all_governors', as_root=True)
-        governors = {}
+        output: str = self.target._execute_util(  # pylint: disable=protected-access
+            'devfreq_get_all_governors', as_root=True)
+        governors: Dict[str, str] = {}
         for x in output.splitlines():
             kv = x.split(' ')
             if kv[0] == '':
@@ -227,7 +233,7 @@ class DevfreqModule(Module):
             governors[kv[0]] = kv[1]
         return governors
 
-    def set_frequency_for_devices(self, devices, freq, exact=False):
+    def set_frequency_for_devices(self, devices: List[str], freq: Union[int, str], exact: bool = False) -> None:
         """
         Set the frequency for the specified list of devices.
 
@@ -237,21 +243,21 @@ class DevfreqModule(Module):
             self.set_max_frequency(device, freq, exact)
             self.set_min_frequency(device, freq, exact)
 
-    def set_all_frequencies(self, freq):
+    def set_all_frequencies(self, freq: Union[int, str]) -> None:
         """
         Set the specified (minimum) frequency for all the (available) devices
         """
         return self.target._execute_util(  # pylint: disable=protected-access
-                'devfreq_set_all_frequencies {}'.format(freq),
-                as_root=True)
+            'devfreq_set_all_frequencies {}'.format(freq),
+            as_root=True)
 
-    def get_all_frequencies(self):
+    def get_all_frequencies(self) -> Dict[str, str]:
         """
         Get the current frequency for all the (available) devices
         """
-        output = self.target._execute_util(  # pylint: disable=protected-access
-                'devfreq_get_all_frequencies', as_root=True)
-        frequencies = {}
+        output: str = self.target._execute_util(  # pylint: disable=protected-access
+            'devfreq_get_all_frequencies', as_root=True)
+        frequencies: Dict[str, str] = {}
         for x in output.splitlines():
             kv = x.split(' ')
             if kv[0] == '':

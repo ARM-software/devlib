@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ from devlib.utils.misc import which
 
 from devlib.utils.parse_aep import AepParser
 
+
 class ArmEnergyProbeInstrument(Instrument):
     """
     Collects power traces using the ARM Energy Probe.
@@ -68,23 +69,23 @@ class ArmEnergyProbeInstrument(Instrument):
 
     mode = CONTINUOUS
 
-    MAX_CHANNELS = 12 # 4 Arm Energy Probes
+    MAX_CHANNELS = 12  # 4 Arm Energy Probes
 
     def __init__(self, target, config_file='./config-aep', keep_raw=False):
         super(ArmEnergyProbeInstrument, self).__init__(target)
         self.arm_probe = which('arm-probe')
         if self.arm_probe is None:
             raise HostError('arm-probe must be installed on the host')
-        #todo detect is config file exist
+        # todo detect is config file exist
         self.attributes = ['power', 'voltage', 'current']
         self.sample_rate_hz = 10000
         self.config_file = config_file
         self.keep_raw = keep_raw
 
         self.parser = AepParser()
-        #TODO make it generic
+        # TODO make it generic
         topo = self.parser.topology_from_config(self.config_file)
-        for item in topo:
+        for item in topo or []:
             if item == 'time':
                 self.add_channel('timestamp', 'time')
             else:
@@ -103,9 +104,9 @@ class ArmEnergyProbeInstrument(Instrument):
     def start(self):
         self.logger.debug(self.command)
         self.armprobe = subprocess.Popen(self.command,
-                                       stderr=self.output_fd_error,
-                                       preexec_fn=os.setpgrp,
-                                       shell=True)
+                                         stderr=self.output_fd_error,
+                                         preexec_fn=os.setpgrp,
+                                         shell=True)
 
     def stop(self):
         self.logger.debug("kill running arm-probe")
@@ -132,7 +133,7 @@ class ArmEnergyProbeInstrument(Instrument):
                     if len(row) < len(active_channels):
                         continue
                     # all data are in micro (seconds/watt)
-                    new = [float(row[i])/1000000 for i in active_indexes]
+                    new = [float(row[i]) / 1000000 for i in active_indexes]
                     writer.writerow(new)
 
         self.output_fd_error.close()

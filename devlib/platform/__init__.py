@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,11 @@
 # limitations under the License.
 #
 
-import logging
+from typing import Optional, List, TYPE_CHECKING, cast, Dict
+from devlib.utils.misc import get_logger
+if TYPE_CHECKING:
+    from devlib.target import Target, AndroidTarget
+    from devlib.utils.types import caseless_string
 
 
 BIG_CPUS = ['A15', 'A57', 'A72', 'A73']
@@ -22,34 +26,37 @@ BIG_CPUS = ['A15', 'A57', 'A72', 'A73']
 class Platform(object):
 
     @property
-    def number_of_clusters(self):
+    def number_of_clusters(self) -> int:
         return len(set(self.core_clusters))
 
     def __init__(self,
-                 name=None,
-                 core_names=None,
-                 core_clusters=None,
-                 big_core=None,
-                 model=None,
-                 modules=None,
+                 name: Optional[str] = None,
+                 core_names: Optional[List['caseless_string']] = None,
+                 core_clusters: Optional[List[int]] = None,
+                 big_core: Optional[str] = None,
+                 model: Optional[str] = None,
+                 modules: Optional[List[Dict[str, Dict]]] = None,
                  ):
         self.name = name
         self.core_names = core_names or []
         self.core_clusters = core_clusters or []
         self.big_core = big_core
-        self.little_core = None
+        self.little_core: Optional[caseless_string] = None
         self.model = model
         self.modules = modules or []
-        self.logger = logging.getLogger(self.name)
+        self.logger = get_logger(self.name or '')
         if not self.core_clusters and self.core_names:
             self._set_core_clusters_from_core_names()
 
-    def init_target_connection(self, target):
+    def init_target_connection(self, target: 'Target') -> None:
+        """
+        do platform specific initialization for the connection
+        """
         # May be ovewritten by subclasses to provide target-specific
         # connection initialisation.
         pass
 
-    def update_from_target(self, target):
+    def update_from_target(self, target: 'Target') -> None:
         if not self.core_names:
             self.core_names = target.cpuinfo.cpu_names
             self._set_core_clusters_from_core_names()
@@ -63,25 +70,28 @@ class Platform(object):
             self.name = self.model
         self._validate()
 
-    def setup(self, target):
+    def setup(self, target: 'Target') -> None:
+        """
+        Platform specific setup
+        """
         # May be overwritten by subclasses to provide platform-specific
         # setup procedures.
         pass
 
-    def _set_core_clusters_from_core_names(self):
+    def _set_core_clusters_from_core_names(self) -> None:
         self.core_clusters = []
-        clusters = []
+        clusters: List[str] = []
         for cn in self.core_names:
             if cn not in clusters:
                 clusters.append(cn)
             self.core_clusters.append(clusters.index(cn))
 
-    def _set_model_from_target(self, target):
+    def _set_model_from_target(self, target: 'Target'):
         if target.os == 'android':
             try:
-                self.model = target.getprop(prop='ro.product.device')
+                self.model = cast('AndroidTarget', target).getprop(prop='ro.product.device')
             except KeyError:
-                self.model = target.getprop('ro.product.model')
+                self.model = cast('AndroidTarget', target).getprop('ro.product.model')
         elif target.file_exists("/proc/device-tree/model"):
             # There is currently no better way to do this cross platform.
             # ARM does not have dmidecode
@@ -95,21 +105,21 @@ class Platform(object):
             except Exception:  # pylint: disable=broad-except
                 pass  # this is best-effort
 
-    def _identify_big_core(self):
+    def _identify_big_core(self) -> 'caseless_string':
         for core in self.core_names:
             if core.upper() in BIG_CPUS:
                 return core
         big_idx = self.core_clusters.index(max(self.core_clusters))
         return self.core_names[big_idx]
 
-    def _validate(self):
+    def _validate(self) -> None:
         if len(self.core_names) != len(self.core_clusters):
             raise ValueError('core_names and core_clusters are of different lengths.')
         if self.big_core and self.number_of_clusters != 2:
             raise ValueError('attempting to set big_core on non-big.LITTLE device. '
                              '(number of clusters  is not 2)')
         if self.big_core and self.big_core not in self.core_names:
-            message = 'Invalid big_core value "{}"; must be in [{}]'
+            message: str = 'Invalid big_core value "{}"; must be in [{}]'
             raise ValueError(message.format(self.big_core,
                                             ', '.join(set(self.core_names))))
         if self.big_core:

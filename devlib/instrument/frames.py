@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,74 +16,88 @@
 import os
 
 from devlib.instrument import (Instrument, CONTINUOUS,
-                               MeasurementsCsv, MeasurementType)
+                               MeasurementsCsv, MeasurementType,
+                               InstrumentChannel)
 from devlib.utils.rendering import (GfxinfoFrameCollector,
                                     SurfaceFlingerFrameCollector,
                                     SurfaceFlingerFrame,
-                                    read_gfxinfo_columns)
+                                    read_gfxinfo_columns,
+                                    FrameCollector)
+from typing import (TYPE_CHECKING, Optional, Type,
+                    OrderedDict, Any, List)
+if TYPE_CHECKING:
+    from devlib.target import Target
 
 
 class FramesInstrument(Instrument):
 
     mode = CONTINUOUS
-    collector_cls = None
+    collector_cls: Optional[Type[FrameCollector]] = None
 
-    def __init__(self, target, collector_target, period=2, keep_raw=True):
+    def __init__(self, target: 'Target', collector_target: Any,
+                 period: int = 2, keep_raw: bool = True):
         super(FramesInstrument, self).__init__(target)
         self.collector_target = collector_target
         self.period = period
         self.keep_raw = keep_raw
-        self.sample_rate_hz = 1 / self.period
-        self.collector = None
-        self.header = None
-        self._need_reset = True
-        self._raw_file = None
+        self.sample_rate_hz: float = 1 / self.period
+        self.collector: Optional[FrameCollector] = None
+        self.header: Optional[List[str]] = None
+        self._need_reset: bool = True
+        self._raw_file: Optional[str] = None
         self._init_channels()
 
-    def reset(self, sites=None, kinds=None, channels=None):
+    def reset(self, sites: Optional[List[str]] = None,
+              kinds: Optional[List[str]] = None,
+              channels: Optional[OrderedDict[str, InstrumentChannel]] = None) -> None:
         super(FramesInstrument, self).reset(sites, kinds, channels)
-        # pylint: disable=not-callable
-        self.collector = self.collector_cls(self.target, self.period,
-                                            self.collector_target, self.header)
+        if self.collector_cls:
+            # pylint: disable=not-callable
+            self.collector = self.collector_cls(self.target, self.period,
+                                                self.collector_target, self.header)  # type: ignore
         self._need_reset = False
         self._raw_file = None
 
-    def start(self):
+    def start(self) -> None:
         if self._need_reset:
             self.reset()
-        self.collector.start()
+        if self.collector:
+            self.collector.start()
 
-    def stop(self):
-        self.collector.stop()
+    def stop(self) -> None:
+        if self.collector:
+            self.collector.stop()
         self._need_reset = True
 
-    def get_data(self, outfile):
+    def get_data(self, outfile: str) -> MeasurementsCsv:
         if self.keep_raw:
             self._raw_file = outfile + '.raw'
-        self.collector.process_frames(self._raw_file)
-        active_sites = [chan.label for chan in self.active_channels]
-        self.collector.write_frames(outfile, columns=active_sites)
+        if self.collector:
+            self.collector.process_frames(self._raw_file)
+        active_sites: List[str] = [chan.label for chan in self.active_channels]
+        if self.collector:
+            self.collector.write_frames(outfile, columns=active_sites)
         return MeasurementsCsv(outfile, self.active_channels, self.sample_rate_hz)
 
-    def get_raw(self):
+    def get_raw(self) -> List[str]:
         return [self._raw_file] if self._raw_file else []
 
-    def _init_channels(self):
+    def _init_channels(self) -> None:
         raise NotImplementedError()
 
-    def teardown(self):
+    def teardown(self) -> None:
         if not self.keep_raw:
-            if os.path.isfile(self._raw_file):
-                os.remove(self._raw_file)
+            if os.path.isfile(self._raw_file or ''):
+                os.remove(self._raw_file or '')
 
 
 class GfxInfoFramesInstrument(FramesInstrument):
 
-    mode = CONTINUOUS
+    mode: int = CONTINUOUS
     collector_cls = GfxinfoFrameCollector
 
-    def _init_channels(self):
-        columns = read_gfxinfo_columns(self.target)
+    def _init_channels(self) -> None:
+        columns: List[str] = read_gfxinfo_columns(self.target)
         for entry in columns:
             if entry == 'Flags':
                 self.add_channel('Flags', MeasurementType('flags', 'flags'))
@@ -94,10 +108,10 @@ class GfxInfoFramesInstrument(FramesInstrument):
 
 class SurfaceFlingerFramesInstrument(FramesInstrument):
 
-    mode = CONTINUOUS
+    mode: int = CONTINUOUS
     collector_cls = SurfaceFlingerFrameCollector
 
-    def _init_channels(self):
+    def _init_channels(self) -> None:
         for field in SurfaceFlingerFrame._fields:
             # remove the "_time" from filed names to avoid duplication
             self.add_channel(field[:-5], 'time_us')

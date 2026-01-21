@@ -1,4 +1,4 @@
-#    Copyright 2018 ARM Limited
+#    Copyright 2018-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 #
 
-#pylint: disable=attribute-defined-outside-init
+# pylint: disable=attribute-defined-outside-init
 import os
 import sys
 import time
@@ -33,6 +33,7 @@ OUTPUT_CAPTURE_FILE = 'acme-cape.csv'
 IIOCAP_CMD_TEMPLATE = Template("""
 ${iio_capture} -n ${host} -b ${buffer_size} -c -f ${outfile} ${iio_device}
 """)
+
 
 def _read_nonblock(pipe, size=1024):
     fd = pipe.fileno()
@@ -93,7 +94,7 @@ class AcmeCapeInstrument(Instrument):
             iio_device=self.iio_device,
             outfile=self.raw_data_file
         )
-        params = {k: quote(v) for k, v in params.items()}
+        params = {k: quote(v or '') for k, v in params.items()}
         self.command = IIOCAP_CMD_TEMPLATE.substitute(**params)
         self.logger.debug('ACME cape command: {}'.format(self.command))
 
@@ -115,7 +116,7 @@ class AcmeCapeInstrument(Instrument):
             if self.process.poll() is None:
                 msg = 'Could not terminate iio-capture:\n{}'
                 raise HostError(msg.format(output))
-        if self.process.returncode != 15: # iio-capture exits with 15 when killed
+        if self.process.returncode != 15:  # iio-capture exits with 15 when killed
             output += self.process.stdout.read().decode(sys.stdout.encoding or 'utf-8', 'replace')
             self.logger.info('ACME instrument encountered an error, '
                              'you may want to try rebooting the ACME device:\n'

@@ -1,4 +1,4 @@
-#    Copyright 2013-2015 ARM Limited
+#    Copyright 2013-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -97,17 +97,18 @@ params = dict(
         'python-dateutil',  # converting between UTC and local time.
         'pexpect>=3.3',  # Send/recieve to/from device
         'pyserial',  # Serial port interface
-        'paramiko', # SSH connection
-        'scp', # SSH connection file transfers
+        'paramiko',  # SSH connection
+        'scp',  # SSH connection file transfers
         'wrapt',  # Basic for construction of decorator functions
         'numpy',
         'pandas',
         'pytest',
-        'lxml', # More robust xml parsing
-        'nest_asyncio', # Allows running nested asyncio loops
-        'greenlet', # Allows running nested asyncio loops
-        'future', # for the "past" Python package
-        'ruamel.yaml >= 0.15.72', # YAML formatted config parsing
+        'lxml',  # More robust xml parsing
+        'nest_asyncio',  # Allows running nested asyncio loops
+        'greenlet',  # Allows running nested asyncio loops
+        'future',  # for the "past" Python package
+        'ruamel.yaml >= 0.15.72',  # YAML formatted config parsing
+        'typing_extensions'
     ],
     extras_require={
         'daq': ['daqpower>=2'],
@@ -115,7 +116,7 @@ params = dict(
         'monsoon': ['python-gflags'],
         'acme': ['pandas', 'numpy'],
         'dev': [
-            'uvloop', # Test async features under uvloop
+            'uvloop',  # Test async features under uvloop
         ]
     },
     # https://pypi.python.org/pypi?%3Aaction=list_classifiers
@@ -141,7 +142,6 @@ class sdist(orig_sdist):
     def initialize_options(self):
         orig_sdist.initialize_options(self)
         self.strip_commit = False
-
 
     def run(self):
         if self.strip_commit:

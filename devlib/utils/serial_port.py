@@ -1,4 +1,4 @@
-#    Copyright 2013-2024 ARM Limited
+#    Copyright 2013-2025 ARM Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,13 +24,16 @@ try:
     from pexpect import fdpexpect
 # pexpect < 4.0.0 does not have fdpexpect module
 except ImportError:
-    import fdpexpect
+    import fdpexpect    # type:ignore
 
 
 # Adding pexpect exceptions into this module's namespace
 from pexpect import EOF, TIMEOUT  # NOQA pylint: disable=W0611
 
 from devlib.exception import HostError
+
+from typing import Optional, TextIO, Union, Tuple
+from collections.abc import Generator
 
 
 class SerialLogger(Logger):
@@ -41,17 +44,22 @@ class SerialLogger(Logger):
         pass
 
 
-def pulse_dtr(conn, state=True, duration=0.1):
+def pulse_dtr(conn: serial.Serial, state: bool = True, duration: float = 0.1) -> None:
     """Set the DTR line of the specified serial connection to the specified state
     for the specified duration (note: the initial state of the line is *not* checked."""
-    conn.setDTR(state)
+    conn.dtr = state
     time.sleep(duration)
-    conn.setDTR(not state)
+    conn.dtr = not state
 
 
 # pylint: disable=keyword-arg-before-vararg
-def get_connection(timeout, init_dtr=None, logcls=SerialLogger,
-                   logfile=None, *args, **kwargs):
+def get_connection(timeout: int, init_dtr: Optional[bool] = None,
+                   logcls=SerialLogger,
+                   logfile: Optional[TextIO] = None, *args, **kwargs) -> Tuple[fdpexpect.fdspawn,
+                                                                               serial.Serial]:
+    """
+    get the serial connection
+    """
     if init_dtr is not None:
         kwargs['dsrdtr'] = True
     try:
@@ -59,10 +67,10 @@ def get_connection(timeout, init_dtr=None, logcls=SerialLogger,
     except serial.SerialException as e:
         raise HostError(str(e))
     if init_dtr is not None:
-        conn.setDTR(init_dtr)
+        conn.dtr = init_dtr
     conn.nonblocking()
-    conn.flushOutput()
-    target = fdpexpect.fdspawn(conn.fileno(), timeout=timeout, logfile=logfile)
+    conn.reset_output_buffer()
+    target: fdpexpect.fdspawn = fdpexpect.fdspawn(conn.fileno(), timeout=timeout, logfile=logfile)
     target.logfile_read = logcls('read')
     target.logfile_send = logcls('send')
 
@@ -73,15 +81,16 @@ def get_connection(timeout, init_dtr=None, logcls=SerialLogger,
     # corruption. The delay prevents that.
     tsln = target.sendline
 
-    def sendline(x):
-        tsln(x)
+    def sendline(s: Union[str, bytes]) -> int:
+        ret: int = tsln(s)
         time.sleep(0.1)
+        return ret
 
     target.sendline = sendline
     return target, conn
 
 
-def write_characters(conn, line, delay=0.05):
+def write_characters(conn: fdpexpect.fdspawn, line: str, delay: float = 0.05) -> None:
     """Write a single line out to serial charcter-by-character. This will ensure that nothing will
     be dropped for longer lines."""
     line = line.rstrip('\r\n')
@@ -93,8 +102,10 @@ def write_characters(conn, line, delay=0.05):
 
 # pylint: disable=keyword-arg-before-vararg
 @contextmanager
-def open_serial_connection(timeout, get_conn=False, init_dtr=None,
-                           logcls=SerialLogger, *args, **kwargs):
+def open_serial_connection(timeout: int, get_conn: bool = False,
+                           init_dtr: Optional[bool] = None,
+                           logcls=SerialLogger, *args, **kwargs) -> Generator[Union[Tuple[fdpexpect.fdspawn, serial.Serial],
+                                                                                    fdpexpect.fdspawn], None, None]:
     """
     Opens a serial connection to a device.
 
@@ -112,11 +123,11 @@ def open_serial_connection(timeout, get_conn=False, init_dtr=None,
               See: http://pexpect.sourceforge.net/pexpect.html
 
     """
-    target, conn = get_connection(timeout, init_dtr=init_dtr,
-                                  logcls=logcls, *args, **kwargs)
+    target, conn = get_connection(timeout, init_dtr,
+                                  logcls, *args, **kwargs)
 
     if get_conn:
-        target_and_conn = (target, conn)
+        target_and_conn: Union[Tuple[fdpexpect.fdspawn, serial.Serial], fdpexpect.fdspawn] = (target, conn)
     else:
         target_and_conn = target
 

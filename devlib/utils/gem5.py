@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import re
-import logging
 
 from devlib.utils.types import numeric
+from devlib.utils.misc import get_logger
 
 
 GEM5STATS_FIELD_REGEX = re.compile(r"^(?P<key>[^- ]\S*) +(?P<value>[^#]+).+$")
@@ -23,7 +23,7 @@ GEM5STATS_DUMP_HEAD = '---------- Begin Simulation Statistics ----------'
 GEM5STATS_DUMP_TAIL = '---------- End Simulation Statistics   ----------'
 GEM5STATS_ROI_NUMBER = 8
 
-logger = logging.getLogger('gem5')
+logger = get_logger('gem5')
 
 
 def iter_statistics_dump(stats_file):

@@ -7,3 +7,7 @@ devlib/bin/scripts/shutils
 doc/_build/
 build/
 dist/
+.venv/
+.vscode/
+venv/
+.history/
