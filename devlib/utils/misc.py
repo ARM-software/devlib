@@ -136,14 +136,6 @@ def get_cpu_name(implementer, part, variant):
     return name
 
 
-def preexec_function():
-    # Change process group in case we have to kill the subprocess and all of
-    # its children later.
-    # TODO: this is Unix-specific; would be good to find an OS-agnostic way
-    #       to do this in case we wanna port WA to Windows.
-    os.setpgrp()
-
-
 check_output_logger = logging.getLogger('check_output')
 
 def get_subprocess(command, **kwargs):
@@ -153,7 +145,7 @@ def get_subprocess(command, **kwargs):
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 stdin=subprocess.PIPE,
-                                preexec_fn=preexec_function,
+                                start_new_session=True,
                                 **kwargs)
 
 

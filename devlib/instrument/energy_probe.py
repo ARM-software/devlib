@@ -75,6 +75,9 @@ class EnergyProbeInstrument(Instrument):
 
     def start(self):
         self.logger.debug(self.command)
+        # FIXME - replace this preexec_fn arg with start_new_session argument.
+        # to address https://github.com/ARM-software/devlib/issues/708.
+        # didnt do it with initial change for the fix due to lack of test hardware
         self.process = subprocess.Popen(self.command,
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE,
